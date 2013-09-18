@@ -1,0 +1,14 @@
+# Eclipse stuff
+.cproject
+.project
+.pydevproject
+
+# SCons stuff
+.sconf_temp/
+.sconsign.dblite
+.settings/
+config.log
+site_scons/site_tools/*.pyc
+
+# Build directory
+build/
