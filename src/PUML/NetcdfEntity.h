@@ -30,40 +30,54 @@ namespace PUML
 
 class NetcdfEntity : public Entity, public NetcdfElement
 {
-	/** Partition dimension + user dimensions */
-	std::vector<size_t> m_dimension;
-
 public:
 	NetcdfEntity()
 	{
 	}
 
 	/**
-	 * @param dimSize The netCDF dimension of group that contains the size
+	 * @param dimSize The netCDF dimension of the group that contains the size
 	 */
 	NetcdfEntity(const char* name, const Type &type, int dimSize,
-			size_t numUserDimensions, Dimension* userDimensions,
+			size_t numUserDimensions, const Dimension* userDimensions,
 			const std::vector<size_t> &offset,
 			NetcdfElement &group)
-		: Entity(name, offset), NetcdfElement(&group),
-		  m_dimension(numUserDimensions+1)
+		: Entity(name, numUserDimensions, userDimensions, offset), NetcdfElement(&group)
 	{
 		int ncVar;
 
 		// Use std::vector to avoid memory leaks
 		std::vector<int> dims(numUserDimensions+1);
 		dims[0] = dimSize;
-		for (size_t i = 0; i < numUserDimensions; i++) {
+		for (size_t i = 0; i < numUserDimensions; i++)
 			dims[i+1] = userDimensions[i].identifier();
-
-			// Set the size of the user dimension, we need them later
-			m_dimension[i+1] = userDimensions[i].size();
-		}
 
 		if (checkError(nc_def_var(parentIdentifier(), name, type2nc(type), dims.size(), &dims[0], &ncVar)))
 			return;
 
 		setIdentifier(ncVar);
+	}
+
+	/**
+	 * Constructor to load an entity from a nc file
+	 */
+	NetcdfEntity(int ncId, NetcdfElement &group)
+		: NetcdfElement(ncId, &group)
+	{
+		// Learn about the dimension size
+		int numDims;
+		if (checkError(nc_inq_varndims(parentIdentifier(), identifier(), &numDims)))
+			return;
+
+		std::vector<int> dims(numDims);
+		if (checkError(nc_inq_vardimid(parentIdentifier(), identifier(), &dims[0])))
+			return;
+
+		dimSize().resize(numDims);
+		for (int i = 1; i < numDims; i++) { // Skip pum dimension
+			if (checkError(nc_inq_dimlen(parentIdentifier(), dims[i], &dimSize()[i])))
+				return;
+		}
 	}
 
 #ifdef PARALLEL
@@ -83,184 +97,124 @@ public:
 #endif // PARALLEL
 
 protected:
-	bool _put(size_t partition, size_t size, const void* values)
+	bool _puta(const size_t* start, const size_t* size, const void* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_schar(size_t partition, size_t size, const signed char* values)
+	bool _puta_schar(const size_t* start, const size_t* size, const signed char* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_schar(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_schar(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_uchar(size_t partition, size_t size, const unsigned char* values)
+	bool _puta_uchar(const size_t* start, const size_t* size, const unsigned char* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_uchar(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_uchar(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_short(size_t partition, size_t size, const short* values)
+	bool _puta_short(const size_t* start, const size_t* size, const short* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_short(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_short(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_int(size_t partition, size_t size, const int* values)
+	bool _puta_int(const size_t* start, const size_t* size, const int* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_int(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_int(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_long(size_t partition, size_t size, const long* values)
+	bool _puta_long(const size_t* start, const size_t* size, const long* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_long(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_long(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_float(size_t partition, size_t size, const float* values)
+	bool _puta_float(const size_t* start, const size_t* size, const float* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_float(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_float(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_double(size_t partition, size_t size, const double* values)
+	bool _puta_double(const size_t* start, const size_t* size, const double* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_double(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_double(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_ushort(size_t partition, size_t size, const unsigned short* values)
+	bool _puta_ushort(const size_t* start, const size_t* size, const unsigned short* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_ushort(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_ushort(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_uint(size_t partition, size_t size, const unsigned int* values)
+	bool _puta_uint(const size_t* start, const size_t* size, const unsigned int* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_uint(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_uint(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_longlong(size_t partition, size_t size, const long long* values)
+	bool _puta_longlong(const size_t* start, const size_t* size, const long long* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
-
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
-
-		if (checkError(nc_put_vara_longlong(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
-
-		return true;
+		return !checkError(nc_put_vara_longlong(parentIdentifier(), identifier(), start, size, values));
 	}
 
-	bool _put_ulonglong(size_t partition, size_t size, const unsigned long long* values)
+	bool _puta_ulonglong(const size_t* start, const size_t* size, const unsigned long long* values)
 	{
-		// Use std::vector to avoid memory leaks
-		std::vector<size_t> start(m_dimension.size(), 0);
-		start[0] = offset(partition);
+		return !checkError(nc_put_vara_ulonglong(parentIdentifier(), identifier(), start, size, values));
+	}
 
-		// Set partition dimension for this call (not threadsafe)
-		m_dimension[0] = size;
+	bool _geta(const size_t* start, const size_t* size, void* values)
+	{
+		return !checkError(nc_get_vara(parentIdentifier(), identifier(), start, size, values));
+	}
 
-		if (checkError(nc_put_vara_ulonglong(parentIdentifier(), identifier(), &start[0], &m_dimension[0], values)))
-			return false;
+	bool _geta_schar(const size_t* start, const size_t* size, signed char* values)
+	{
+		return !checkError(nc_get_vara_schar(parentIdentifier(), identifier(), start, size, values));
+	}
 
-		return true;
+	bool _geta_uchar(const size_t* start, const size_t* size, unsigned char* values)
+	{
+		return !checkError(nc_get_vara_uchar(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_short(const size_t* start, const size_t* size, short* values)
+	{
+		return !checkError(nc_get_vara_short(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_int(const size_t* start, const size_t* size, int* values)
+	{
+		return !checkError(nc_get_vara_int(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_long(const size_t* start, const size_t* size, long* values)
+	{
+		return !checkError(nc_get_vara_long(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_float(const size_t* start, const size_t* size, float* values)
+	{
+		return !checkError(nc_get_vara_float(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_double(const size_t* start, const size_t* size, double* values)
+	{
+		return !checkError(nc_get_vara_double(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_ushort(const size_t* start, const size_t* size, unsigned short* values)
+	{
+		return !checkError(nc_get_vara_ushort(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_uint(const size_t* start, const size_t* size, unsigned int* values)
+	{
+		return !checkError(nc_get_vara_uint(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_longlong(const size_t* start, const size_t* size, long long* values)
+	{
+		return !checkError(nc_get_vara_longlong(parentIdentifier(), identifier(), start, size, values));
+	}
+
+	bool _geta_ulonglong(const size_t* start, const size_t* size, unsigned long long* values)
+	{
+		return !checkError(nc_get_vara_ulonglong(parentIdentifier(), identifier(), start, size, values));
 	}
 
 private:

@@ -87,6 +87,16 @@ public:
 		TS_ASSERT(m_ncPum.isValid());
 	}
 
+	void testOpen()
+	{
+		setUpOpen();
+#ifdef PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME, MPI_COMM_WORLD));
+#else // PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
+#endif // PARALLEL
+	}
+
 	void testCreateGroup()
 	{
 		PUML::NetcdfGroup ncGroup = m_ncPum.createGroup("testGroup");
@@ -97,5 +107,11 @@ public:
 	{
 		PUML::NetcdfGroup ncGroup = m_ncPum.createGroup("testGroup");
 		TS_ASSERT(m_ncPum.endDefinition());
+	}
+
+private:
+	void setUpOpen()
+	{
+		TS_ASSERT(m_ncPum.close());
 	}
 };

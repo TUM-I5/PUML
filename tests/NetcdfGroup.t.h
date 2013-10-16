@@ -52,6 +52,14 @@ public:
 		remove(TEST_FILENAME);
 	}
 
+	/**
+	 * Test the load constructor only
+	 */
+	void testConstructor()
+	{
+		setUpOpen();
+	}
+
 	void testCreateDimension()
 	{
 		m_ncGroup.createDimension("testDim", 2);
@@ -87,5 +95,17 @@ public:
 		TS_ASSERT(m_ncGroup.setSize(r, 5));
 		TS_ASSERT(m_ncGroup.setSize(r+s, 5));
 		TS_ASSERT(m_ncGroup.setSize(r+2*s, 5));
+	}
+
+private:
+	void setUpOpen()
+	{
+		TS_ASSERT(m_ncPum.close());
+
+#ifdef PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME, MPI_COMM_WORLD));
+#else // PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
+#endif // PARALLEL
 	}
 };

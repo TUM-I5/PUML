@@ -69,6 +69,16 @@ public:
 	}
 #endif // PARALLEL
 
+	virtual bool open(const char* path) = 0;
+
+#ifdef PARALLEL
+	bool open(const char* path, MPI_Comm comm, MPI_Info info = MPI_INFO_NULL)
+	{
+		setMPIComm(comm);
+		return _open(path, comm, info);
+	}
+#endif // PARALLEL
+
 	/**
 	 * Create a group in this file
 	 *
@@ -78,13 +88,20 @@ public:
 	virtual Group& createGroup(const char* name, size_t size = Group::UNLIMITED) = 0;
 
 	/**
+	 * Create an indexed group in this file
+	 *
+	 * @see createGroup
+	 */
+	virtual Group& createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED) = 0;
+
+	/**
 	 * Creates a special group for vertices
 	 *
 	 * @ingroup HighLevelApi
 	 */
-	Group& createVertexGroup(size_t size = Group::UNLIMITED)
+	Group& createVertexGroup(size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
 	{
-		return createGroup("vertex", size);
+		return createGroupIndexed("vertex", size, indexSize);
 	}
 
 	/**
@@ -120,6 +137,7 @@ protected:
 	virtual bool _create(const char* path) = 0;
 #ifdef PARALLEL
 	virtual bool _create(const char* path, MPI_Comm comm, MPI_Info info = MPI_INFO_NULL) = 0;
+	virtual bool _open(const char* path, MPI_Comm comm, MPI_Info info = MPI_INFO_NULL) = 0;
 #endif // PARALLEL
 
 protected:

@@ -78,6 +78,14 @@ public:
 		remove(TEST_FILENAME);
 	}
 
+	/**
+	 * Test the load constructor only
+	 */
+	void testConstructor()
+	{
+		setUpOpen();
+	}
+
 	void testSetCollective()
 	{
 		TS_ASSERT(m_ncEntity0.setCollective(true));
@@ -102,8 +110,14 @@ public:
 	}
 
 private:
-	void initPartitionSize()
+	void setUpOpen()
 	{
+		TS_ASSERT(m_ncPum.close());
 
+#ifdef PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME, MPI_COMM_WORLD));
+#else // PARALLEL
+		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
+#endif // PARALLEL
 	}
 };

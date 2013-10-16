@@ -34,26 +34,32 @@ private:
 	/** nc identifier for the size dimension */
 	int m_ncDimSize;
 
+	/** nc identifier for the index size dimension */
+	int m_ncDimIndexSize;
+
 	/** User defined dimensions */
 	std::vector<Dimension> m_dimensions;
 
 	/** nc identifier for the offset variable */
 	int m_ncVarOffset;
 
+	/** index variable */
+	NetcdfEntity m_entityIndex;
+
 	/** Entities in this group */
 	std::vector<NetcdfEntity> m_entities;
 
 public:
 	NetcdfGroup()
-		: m_ncDimPartition(-1), m_ncDimSize(-1), m_ncVarOffset(-1)
+		: m_ncDimPartition(-1), m_ncDimSize(-1), m_ncDimIndexSize(-1), m_ncVarOffset(-1)
 	{
 	}
 
 	/**
 	 * @param size The total size of this group. Use NC_UNLIMITED if unknown
 	 */
-	NetcdfGroup(const char* name, size_t numPartitions, NetcdfElement &ncPum, MPIElement comm, size_t size = NC_UNLIMITED)
-		: Group(name, numPartitions, comm), NetcdfElement(&ncPum)
+	NetcdfGroup(const char* name, size_t numPartitions, NetcdfElement &ncPum, MPIElement &comm, size_t size)
+		: Group(name, numPartitions, comm), NetcdfElement(&ncPum), m_ncDimIndexSize(-1)
 	{
 		int ncGroup;
 		if (checkError(nc_def_grp(ncPum.identifier(), name, &ncGroup)))
@@ -73,6 +79,102 @@ public:
 		if (checkError(nc_var_par_access(identifier(), m_ncVarOffset, NC_COLLECTIVE)))
 			return;
 #endif // PARALLEL
+	}
+
+	/**
+	 * @param size The total size of this group. Use NC_UNLIMITED if unknown
+	 */
+	NetcdfGroup(const char* name, size_t numPartitions, NetcdfElement &ncPum, MPIElement comm,
+			size_t size, size_t indexSize)
+		: Group(name, numPartitions, comm), NetcdfElement(&ncPum)
+	{
+		int ncGroup;
+		if (checkError(nc_def_grp(ncPum.identifier(), name, &ncGroup)))
+			return;
+
+		setIdentifier(ncGroup);
+
+		if (checkError(nc_def_dim(identifier(), DIM_PARTITION, numPartitions, &m_ncDimPartition)))
+			return;
+
+		if (checkError(nc_def_dim(identifier(), DIM_SIZE, size, &m_ncDimSize)))
+			return;
+
+		if (checkError(nc_def_dim(identifier(), DIM_INDEXSIZE, indexSize, &m_ncDimIndexSize)))
+			return;
+
+		if (checkError(nc_def_var(identifier(), VAR_OFFSET, NC_UINT64, 1, &m_ncDimPartition, &m_ncVarOffset)))
+			return;
+#ifdef PARALLEL
+		if (checkError(nc_var_par_access(identifier(), m_ncVarOffset, NC_COLLECTIVE)))
+			return;
+#endif // PARALLEL
+
+		m_entityIndex = NetcdfEntity(VAR_INDEX, Type::UINT64, m_ncDimIndexSize, 0, 0L, offset(), *this);
+		m_entityIndex.setCollective(true);
+		setEntityIndex(&m_entityIndex);
+	}
+
+	/**
+	 * Constructor to load a group from the nc file
+	 *
+	 * @param ncId The netcdf identifier of the group
+	 */
+	NetcdfGroup(int ncId, NetcdfElement &ncPum, MPIElement &comm)
+		: Group(comm), NetcdfElement(ncId, &ncPum)
+	{
+		if (checkError(nc_inq_dimid(identifier(), DIM_PARTITION, &m_ncDimPartition)))
+			return;
+
+		if (checkError(nc_inq_dimid(identifier(), DIM_SIZE, &m_ncDimSize)))
+			return;
+
+		int ncError = nc_inq_dimid(identifier(), DIM_INDEXSIZE, &m_ncDimIndexSize);
+		if (ncError == NC_EBADDIM) {
+			// Not an indexed variable
+			m_ncDimIndexSize = -1;
+		} else {
+			if (checkError(ncError))
+				return;
+
+			// TODO Indexed group
+		}
+
+		if (checkError(nc_inq_varid(identifier(), VAR_OFFSET, &m_ncVarOffset)))
+			return;
+#ifdef PARALLEL
+		if (checkError(nc_var_par_access(identifier(), m_ncVarOffset, NC_COLLECTIVE)))
+			return;
+#endif // PARALLEL
+
+		// Initialize variables
+		int numVars;
+		if (checkError(nc_inq_varids(identifier(), &numVars, 0L)))
+			return;
+
+		std::vector<int> varIds(numVars);
+		if (checkError(nc_inq_varids(identifier(), 0L, &varIds[0])))
+			return;
+
+		for (std::vector<int>::const_iterator i = varIds.begin(); i != varIds.end(); i++) {
+			if (*i == m_ncVarOffset)
+				continue;
+
+			m_entities.push_back(NetcdfEntity(*i, *this));
+		}
+
+		// Read offsets
+		size_t numPartitions;
+		if (checkError(nc_inq_dimlen(identifier(), m_ncDimPartition, &numPartitions)))
+			return;
+
+		std::vector<unsigned long long> o(numPartitions);
+		if (checkError(nc_get_var_ulonglong(identifier(), m_ncVarOffset, &o[0])))
+			return;
+
+		offset().resize(numPartitions);
+		for (size_t i = 0; i < numPartitions; i++)
+			offset()[i] = o[i];
 	}
 
 	Dimension& createDimension(const char* name, size_t size)

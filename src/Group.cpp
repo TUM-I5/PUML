@@ -16,5 +16,7 @@ const size_t PUML::Group::UNLIMITED = 0;
 
 const char* PUML::Group::DIM_PARTITION = "_partition";
 const char* PUML::Group::DIM_SIZE = "_size";
+const char* PUML::Group::DIM_INDEXSIZE = "_indexsize";
 
 const char* PUML::Group::VAR_OFFSET = "_offset";
+const char* PUML::Group::VAR_INDEX = "_index";

@@ -44,17 +44,30 @@ private:
 	/** A copy of the offset variable in this group */
 	std::vector<size_t> m_offset;
 
+	/** Entity the index variable */
+	Entity* m_entityIndex;
+
 public:
 	Group()
+		: m_entityIndex(0L)
 	{
 	}
 
 	Group(const char* name, size_t numPartitions, MPIElement &comm)
-		: MPIElement(comm), m_offset(numPartitions)
+		: MPIElement(comm), m_offset(numPartitions), m_entityIndex(0L)
 	{
 		m_offset[0] = 0;
 		for (size_t i = 1; i < m_offset.size(); i++)
 			m_offset[i] = std::numeric_limits<size_t>::max();
+	}
+
+	/**
+	 * Constructor to for loading groups from a file
+	 * Name and offsets must be set later
+	 */
+	Group(MPIElement &comm)
+		: MPIElement(comm), m_entityIndex(0L)
+	{
 	}
 
 	virtual ~Group()
@@ -183,8 +196,22 @@ public:
 		return setOffset(partition+1);
 	}
 
+	bool putIndex(size_t partition, size_t size, const unsigned long* values)
+	{
+		if (m_entityIndex == 0L)
+			// Not an indexed group -> do nothing
+			return false;
+
+		return m_entityIndex->put(partition, size, values);
+	}
+
 protected:
 	const std::vector<size_t>& offset() const
+	{
+		return m_offset;
+	}
+
+	std::vector<size_t>& offset()
 	{
 		return m_offset;
 	}
@@ -194,14 +221,29 @@ protected:
 	 */
 	virtual bool setOffset(size_t partition) = 0;
 
+	/**
+	 * Called by the child classes for indexed groups
+	 */
+	void setEntityIndex(Entity* entity)
+	{
+		m_entityIndex = entity;
+	}
+
+	bool indexed() const
+	{
+		return m_entityIndex != 0L;
+	}
+
 public:
 	static const size_t UNLIMITED;
 
 protected:
 	static const char* DIM_PARTITION;
 	static const char* DIM_SIZE;
+	static const char* DIM_INDEXSIZE;
 
 	static const char* VAR_OFFSET;
+	static const char* VAR_INDEX;
 };
 
 }
