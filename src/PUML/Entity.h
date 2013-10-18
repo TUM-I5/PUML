@@ -50,6 +50,14 @@ public:
 		}
 	}
 
+	/**
+	 * Constructor for loading an entity from file
+	 */
+	Entity(const std::vector<size_t> &offset)
+		: m_collective(false), m_offset(&offset)
+	{
+	}
+
 	virtual ~Entity()
 	{
 	}
@@ -117,7 +125,12 @@ public:
 		// Set partition dimension for this call (not threadsafe)
 		m_dimSize[0] = size;
 
-		return _geta(start, size, values);
+		return _geta(&s[0], &m_dimSize[0], values);
+	}
+
+	const char* name() const
+	{
+		return m_name.c_str();
 	}
 
 protected:
@@ -137,6 +150,11 @@ protected:
 	std::vector<size_t>& dimSize()
 	{
 		return m_dimSize;
+	}
+
+	void setName(const char* name)
+	{
+		m_name = name;
 	}
 
 	virtual bool _puta(const size_t* start, const size_t* size, const void* values) = 0;

@@ -61,9 +61,14 @@ public:
 	/**
 	 * Constructor to load an entity from a nc file
 	 */
-	NetcdfEntity(int ncId, NetcdfElement &group)
-		: NetcdfElement(ncId, &group)
+	NetcdfEntity(int ncId, const std::vector<size_t> &offset, NetcdfElement &group)
+		: Entity(offset), NetcdfElement(ncId, &group)
 	{
+		char name[NC_MAX_NAME+1];
+		if (checkError(nc_inq_varname(parentIdentifier(), identifier(), name)))
+			return;
+		setName(name);
+
 		// Learn about the dimension size
 		int numDims;
 		if (checkError(nc_inq_varndims(parentIdentifier(), identifier(), &numDims)))

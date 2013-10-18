@@ -17,3 +17,4 @@ const int PUML::Pum::FILE_VERSION = 1;
 
 const char* PUML::Pum::ATT_CONVENTIONS = "Conventions";
 const char* PUML::Pum::ATT_FILE_VERSION = "Version";
+const char* PUML::Pum::ATT_NUM_PARTITIONS = "Partitions";

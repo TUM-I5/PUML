@@ -54,7 +54,7 @@ public:
 	}
 
 	Group(const char* name, size_t numPartitions, MPIElement &comm)
-		: MPIElement(comm), m_offset(numPartitions), m_entityIndex(0L)
+		: MPIElement(comm), m_name(name), m_offset(numPartitions), m_entityIndex(0L)
 	{
 		m_offset[0] = 0;
 		for (size_t i = 1; i < m_offset.size(); i++)
@@ -77,11 +77,6 @@ public:
 	const char* name() const
 	{
 		return m_name.c_str();
-	}
-
-	size_t numPartitions() const
-	{
-		return m_offset.size();
 	}
 
 	/**
@@ -138,6 +133,8 @@ public:
 		Dimension &dim = createDimension("vertex", numVertices);
 		return createEntity("vertex", Type::Int64, 1, &dim);
 	}
+
+	virtual Entity* getEntity(const char* name) = 0;
 
 	/**
 	 * Sets the size of a partition
@@ -206,6 +203,11 @@ public:
 	}
 
 protected:
+	size_t numPartitions() const
+	{
+		return m_offset.size();
+	}
+
 	const std::vector<size_t>& offset() const
 	{
 		return m_offset;
@@ -232,6 +234,11 @@ protected:
 	bool indexed() const
 	{
 		return m_entityIndex != 0L;
+	}
+
+	void setName(const char* name)
+	{
+		m_name = name;
 	}
 
 public:

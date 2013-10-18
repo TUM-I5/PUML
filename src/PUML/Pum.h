@@ -18,6 +18,7 @@
 #endif // PARALLEL
 
 #include <cstdlib>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -114,6 +115,8 @@ public:
 		return createGroup("cell", size);
 	}
 
+	virtual Group* getGroup(const char* name) = 0;
+
 	/**
 	 * End the definition phase. Groups and entities can only be added during the
 	 * definition phase
@@ -134,6 +137,11 @@ public:
 	}
 
 protected:
+	void setNumPartitions(size_t numPartitions)
+	{
+		m_numPartitions = numPartitions;
+	}
+
 	virtual bool _create(const char* path) = 0;
 #ifdef PARALLEL
 	virtual bool _create(const char* path, MPI_Comm comm, MPI_Info info = MPI_INFO_NULL) = 0;
@@ -146,6 +154,7 @@ protected:
 
 	static const char* ATT_CONVENTIONS;
 	static const char* ATT_FILE_VERSION;
+	static const char* ATT_NUM_PARTITIONS;
 };
 
 }

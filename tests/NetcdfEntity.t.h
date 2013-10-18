@@ -18,6 +18,8 @@
 
 #include <cxxtest/TestSuite.h>
 
+#define private public
+
 #include "PUML/NetcdfEntity.h"
 #include "PUML/NetcdfGroup.h"
 #include "PUML/NetcdfPum.h"
@@ -109,6 +111,36 @@ public:
 		TS_ASSERT(m_ncEntity1.put(r, 5, values));
 	}
 
+	void testGet()
+	{
+		TS_ASSERT(m_ncEntity0.setCollective(true));
+		TS_ASSERT(m_ncEntity1.setCollective(true));
+
+		int r = 0;
+#ifdef PARALLEL
+		MPI_Comm_rank(MPI_COMM_WORLD, &r);
+#endif // PARALLEL
+
+		float values[2*5];
+		for (int i = 0; i < 2*5; i++)
+			values[i] = i+1000*r;
+
+		TS_ASSERT(m_ncEntity0.put(r, 5, values));
+		TS_ASSERT(m_ncEntity1.put(r, 5, values));
+
+		setUpOpen();
+
+		TS_ASSERT(m_ncEntity0.setCollective(true));
+		TS_ASSERT(m_ncEntity1.setCollective(true));
+
+		for (int i = 0; i < 2*5; i++)
+			values[i] = 0;
+		TS_ASSERT(m_ncEntity1.get(r, 5, values));
+		for (int i = r; i < r+5; i++)
+			TS_ASSERT_EQUALS(values[i], i+1000*r);
+		// TODO check why we can't get ints as floats
+	}
+
 private:
 	void setUpOpen()
 	{
@@ -119,5 +151,10 @@ private:
 #else // PARALLEL
 		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
 #endif // PARALLEL
+
+		m_ncGroup = *m_ncPum.getGroup("testGroup");
+
+		m_ncEntity0 = *m_ncGroup.getEntity("testEntity0");
+		m_ncEntity1 = *m_ncGroup.getEntity("testEntity1");
 	}
 };

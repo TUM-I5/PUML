@@ -37,7 +37,7 @@ class NetcdfPum : public Pum, public NetcdfElement
 {
 private:
 	/** Groups in this file */
-	std::vector<NetcdfGroup> m_groups;
+	std::map<std::string, NetcdfGroup> m_groups;
 
 public:
 	NetcdfPum()
@@ -75,9 +75,9 @@ public:
 		if (size == Group::UNLIMITED)
 			size = NC_UNLIMITED;
 
-		m_groups.push_back(NetcdfGroup(name, numPartitions(), *this, *this, size));
+		m_groups[name] = NetcdfGroup(name, numPartitions(), *this, *this, size);
 
-		return m_groups.back();
+		return m_groups[name];
 	}
 
 	NetcdfGroup& createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
@@ -87,9 +87,17 @@ public:
 		if (indexSize == Group::UNLIMITED)
 			indexSize = NC_UNLIMITED;
 
-		m_groups.push_back(NetcdfGroup(name, numPartitions(), *this, *this, size, indexSize));
+		m_groups[name] = NetcdfGroup(name, numPartitions(), *this, *this, size, indexSize);
 
-		return m_groups.back();
+		return m_groups[name];
+	}
+
+	NetcdfGroup* getGroup(const char* name)
+	{
+		if (m_groups.find(name) == m_groups.end())
+			return 0L;
+
+		return &m_groups.at(name);
 	}
 
 	bool endDefinition()
@@ -154,6 +162,9 @@ private:
 			return false;
 		if (checkError(nc_put_att_int(identifier(), NC_GLOBAL, ATT_FILE_VERSION, NC_INT, 1, &FILE_VERSION)))
 			return false;
+		unsigned long long np = numPartitions();
+		if (checkError(nc_put_att_ulonglong(identifier(), NC_GLOBAL, ATT_NUM_PARTITIONS, NC_UINT64, 1, &np)))
+			return false;
 
 		return true;
 	}
@@ -180,6 +191,12 @@ private:
 			// Currently only one version is supported
 			return false;
 
+		// Number of partitions
+		unsigned long long np;
+		if (checkError(nc_get_att_ulonglong(identifier(), NC_GLOBAL, ATT_NUM_PARTITIONS, &np)))
+			return false;
+		setNumPartitions(np);
+
 		// Get group ids
 		int numGrps;
 		if (checkError(nc_inq_grps(identifier(), &numGrps, 0L)))
@@ -189,8 +206,12 @@ private:
 			return false;
 
 		// Create the groups
-		for (std::vector<int>::const_iterator i = grpIds.begin(); i != grpIds.end(); i++)
-			m_groups.push_back(NetcdfGroup(*i, *this, *this));
+		for (std::vector<int>::const_iterator i = grpIds.begin(); i != grpIds.end(); i++) {
+			NetcdfGroup group = NetcdfGroup(*i, *this, *this);
+			m_groups[group.name()] = group;
+			if (!m_groups[group.name()].loadEntities())
+				return false;
+		}
 
 		return true;
 

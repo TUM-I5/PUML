@@ -13,6 +13,8 @@
 #ifndef PUML_NETCDF_GROUP_H
 #define PUML_NETCDF_GROUP_H
 
+#include <map>
+
 #include <netcdf.h>
 
 #include "PUML/Dimension.h"
@@ -47,7 +49,7 @@ private:
 	NetcdfEntity m_entityIndex;
 
 	/** Entities in this group */
-	std::vector<NetcdfEntity> m_entities;
+	std::map<std::string, NetcdfEntity> m_entities;
 
 public:
 	NetcdfGroup()
@@ -123,6 +125,11 @@ public:
 	NetcdfGroup(int ncId, NetcdfElement &ncPum, MPIElement &comm)
 		: Group(comm), NetcdfElement(ncId, &ncPum)
 	{
+		char name[NC_MAX_NAME+1];
+		if (checkError(nc_inq_grpname(identifier(), name)))
+			return;
+		setName(name);
+
 		if (checkError(nc_inq_dimid(identifier(), DIM_PARTITION, &m_ncDimPartition)))
 			return;
 
@@ -146,22 +153,6 @@ public:
 		if (checkError(nc_var_par_access(identifier(), m_ncVarOffset, NC_COLLECTIVE)))
 			return;
 #endif // PARALLEL
-
-		// Initialize variables
-		int numVars;
-		if (checkError(nc_inq_varids(identifier(), &numVars, 0L)))
-			return;
-
-		std::vector<int> varIds(numVars);
-		if (checkError(nc_inq_varids(identifier(), 0L, &varIds[0])))
-			return;
-
-		for (std::vector<int>::const_iterator i = varIds.begin(); i != varIds.end(); i++) {
-			if (*i == m_ncVarOffset)
-				continue;
-
-			m_entities.push_back(NetcdfEntity(*i, *this));
-		}
 
 		// Read offsets
 		size_t numPartitions;
@@ -190,9 +181,9 @@ public:
 
 	NetcdfEntity& createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions)
 	{
-		m_entities.push_back(NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions, offset(), *this));
+		m_entities[name] = NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions, offset(), *this);
 
-		return m_entities.back();
+		return m_entities[name];
 	}
 
 	/**
@@ -209,6 +200,43 @@ public:
 	NetcdfEntity& createEntity(const char* name, const Type &type)
 	{
 		return createEntity(name, type, 0, 0L);
+	}
+
+	NetcdfEntity* getEntity(const char* name)
+	{
+		if (m_entities.find(name) == m_entities.end())
+			return 0L;
+
+		return &m_entities.at(name);
+	}
+
+	/**
+	 * Loads the entities from the netcdf file
+	 * We can't do this in the constructor because this results in wrong values for m_parent
+	 *
+	 * @internal
+	 */
+	bool loadEntities()
+	{
+		int numVars;
+		if (checkError(nc_inq_varids(identifier(), &numVars, 0L)))
+			return false;
+
+		std::vector<int> varIds(numVars);
+		if (checkError(nc_inq_varids(identifier(), 0L, &varIds[0])))
+			return false;
+
+		for (std::vector<int>::const_iterator i = varIds.begin(); i != varIds.end(); i++) {
+			if (*i == m_ncVarOffset)
+				continue;
+
+			NetcdfEntity entity = NetcdfEntity(*i, offset(), *this);
+			m_entities[entity.name()] = entity;
+		}
+
+		// TODO index entity
+
+		return true;
 	}
 
 protected:
