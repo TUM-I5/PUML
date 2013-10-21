@@ -138,6 +138,12 @@ public:
 		TS_ASSERT(m_ncEntity1.get(r, 5, values));
 		for (int i = r; i < r+5; i++)
 			TS_ASSERT_EQUALS(values[i], i+1000*r);
+
+		for (int i = 0; i < 2*5; i++)
+			values[i] = 0;
+		TS_ASSERT(m_ncEntity1.get(r, values));
+		for (int i = r; i < r+5; i++)
+			TS_ASSERT_EQUALS(values[i], i+1000*r);
 		// TODO check why we can't get ints as floats
 	}
 
