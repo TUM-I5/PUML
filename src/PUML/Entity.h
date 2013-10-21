@@ -81,7 +81,7 @@ public:
 	template<typename T>
 	bool put(size_t partition, size_t size, const T* values)
 	{
-		if (!isPartitionSizeSet(partition))
+		if (!isPartitionOffsetSet(partition))
 			return false;
 
 		return puta((*m_offset)[partition], size, values);
@@ -90,10 +90,22 @@ public:
 	template<typename T>
 	bool get(size_t partition, size_t size, T* values)
 	{
-		if (!isPartitionSizeSet(partition))
+		if (!isPartitionOffsetSet(partition))
 			return false;
 
 		return geta((*m_offset)[partition], size, values);
+	}
+
+	/**
+	 * @return All values of a partition
+	 */
+	template<typename T>
+	bool get(size_t partition, T* values)
+	{
+		if (!isPartitionSizeSet(partition))
+			return false;
+
+		return get(partition, partitionSize(partition), values);
 	}
 
 	/**
@@ -184,9 +196,24 @@ protected:
 	virtual bool _geta_ulonglong(const size_t* start, const size_t* size, unsigned long long* values) = 0;
 
 private:
-	bool isPartitionSizeSet(size_t partition)
+	bool isPartitionOffsetSet(size_t partition)
 	{
 		return (*m_offset)[partition] != std::numeric_limits<size_t>::max();
+	}
+
+	bool isPartitionSizeSet(size_t partition)
+	{
+		return (*m_offset)[partition+1] != std::numeric_limits<size_t>::max();
+	}
+
+	/**
+	 * @return The size of a partition (if set)
+	 *
+	 * @see Group::size
+	 */
+	size_t partitionSize(size_t partition)
+	{
+		return (*m_offset)[partition+1] - (*m_offset)[partition];
 	}
 
 	template<typename T>

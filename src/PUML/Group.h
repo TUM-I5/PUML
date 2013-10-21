@@ -41,7 +41,11 @@ private:
 	/** Name of this group */
 	std::string m_name;
 
-	/** A copy of the offset variable in this group */
+	/**
+	 * A copy of the offset variable in this group
+	 * The size of this array is one larger than numPartitions to easily
+	 * compute the size of the last partition
+	 */
 	std::vector<size_t> m_offset;
 
 	/** Entity the index variable */
@@ -54,7 +58,7 @@ public:
 	}
 
 	Group(const char* name, size_t numPartitions, MPIElement &comm)
-		: MPIElement(comm), m_name(name), m_offset(numPartitions), m_entityIndex(0L)
+		: MPIElement(comm), m_name(name), m_offset(numPartitions+1), m_entityIndex(0L)
 	{
 		m_offset[0] = 0;
 		for (size_t i = 1; i < m_offset.size(); i++)
@@ -151,10 +155,10 @@ public:
 #ifdef PARALLEL
 		// Parallel mode
 		// Get the size of all other partitions to compute the *offset* of the next partition
-		unsigned long* buf = new unsigned long[2*mpiSize()];
+		std::vector<unsigned long> buf(2*mpiSize());
 		buf[2*mpiRank()] = partition;
 		buf[2*mpiRank()+1] = size;
-		MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, buf, 2, MPI_UNSIGNED_LONG, mpiComm());
+		MPI_Allgather(MPI_IN_PLACE, 0, MPI_DATATYPE_NULL, &buf[0], 2, MPI_UNSIGNED_LONG, mpiComm());
 
 		for (int i = 0; i < mpiSize(); i++) {
 			if (buf[i*2] < basePartition)
@@ -184,13 +188,20 @@ public:
 			m_offset[basePartition+i+1] += m_offset[basePartition+i];
 		}
 
-		delete [] buf;
 #else // PARALLEL
 		if (basePartition+1 < m_offset.size())
 			m_offset[basePartition+1] = m_offset[basePartition] + size;
 #endif // PARALLEL
 
 		return setOffset(partition+1);
+	}
+
+	/**
+	 * @return The size of a partition
+	 */
+	size_t size(size_t partition)
+	{
+		return m_offset[partition+1] - m_offset[partition];
 	}
 
 	bool putIndex(size_t partition, size_t size, const unsigned long* values)
@@ -205,7 +216,7 @@ public:
 protected:
 	size_t numPartitions() const
 	{
-		return m_offset.size();
+		return m_offset.size()-1;
 	}
 
 	const std::vector<size_t>& offset() const

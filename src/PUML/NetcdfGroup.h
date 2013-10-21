@@ -163,9 +163,12 @@ public:
 		if (checkError(nc_get_var_ulonglong(identifier(), m_ncVarOffset, &o[0])))
 			return;
 
-		offset().resize(numPartitions);
+		offset().resize(numPartitions+1);
 		for (size_t i = 0; i < numPartitions; i++)
 			offset()[i] = o[i];
+
+		if (checkError(nc_inq_dimlen(identifier(), m_ncDimSize, &offset()[numPartitions])))
+			return;
 	}
 
 	Dimension& createDimension(const char* name, size_t size)

@@ -97,6 +97,16 @@ public:
 		TS_ASSERT(m_ncGroup.setSize(r+2*s, 5));
 	}
 
+	void testSize()
+	{
+		testSetSize();
+
+		setUpOpen();
+
+		TS_ASSERT_EQUALS(m_ncGroup.size(0), 5ul);
+		TS_ASSERT_EQUALS(m_ncGroup.size(1), 5ul);
+	}
+
 private:
 	void setUpOpen()
 	{
@@ -107,5 +117,7 @@ private:
 #else // PARALLEL
 		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
 #endif // PARALLEL
+
+		m_ncGroup = *m_ncPum.getGroup("testGroup");
 	}
 };
