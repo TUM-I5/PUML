@@ -30,9 +30,9 @@ class TestNetcdfEntity : public CxxTest::TestSuite
 {
 private:
 	PUML::NetcdfPum m_ncPum;
-	PUML::NetcdfGroup m_ncGroup;
-	PUML::NetcdfEntity m_ncEntity0;
-	PUML::NetcdfEntity m_ncEntity1;
+	PUML::NetcdfGroup* m_ncGroup;
+	PUML::NetcdfEntity* m_ncEntity0;
+	PUML::NetcdfEntity* m_ncEntity1;
 
 public:
 	void setUp()
@@ -44,16 +44,16 @@ public:
 #endif // PARALLEL
 		//m_ncGroup = m_ncPum.createGroup("testGroup", 25);
 		m_ncGroup = m_ncPum.createGroup("testGroup");
-		TS_ASSERT(m_ncGroup.isValid());
+		TS_ASSERT(m_ncGroup);
 
 		// Without extra dimension
-		m_ncEntity0 = m_ncGroup.createEntity("testEntity0", PUML::Type::Int);
-		TS_ASSERT(m_ncEntity0.isValid());
+		m_ncEntity0 = m_ncGroup->createEntity("testEntity0", PUML::Type::Int);
+		TS_ASSERT(m_ncEntity0);
 
 		// With extra dimension
-		PUML::Dimension dim = m_ncGroup.createDimension("testDimension", 2);
-		m_ncEntity1 = m_ncGroup.createEntity("testEntity1", PUML::Type::Float, 1, &dim);
-		TS_ASSERT(m_ncEntity1.isValid());
+		PUML::Dimension dim = m_ncGroup->createDimension("testDimension", 2);
+		m_ncEntity1 = m_ncGroup->createEntity("testEntity1", PUML::Type::Float, 1, &dim);
+		TS_ASSERT(m_ncEntity1);
 
 		TS_ASSERT(m_ncPum.endDefinition());
 
@@ -65,9 +65,9 @@ public:
 #endif // PARALLEL
 
 		// 2 MPI processes / 5 partitions
-		TS_ASSERT(m_ncGroup.setSize(r, 5));
-		TS_ASSERT(m_ncGroup.setSize(r+s, 5));
-		TS_ASSERT(m_ncGroup.setSize(r+2*s, 5));
+		TS_ASSERT(m_ncGroup->setSize(r, 5));
+		TS_ASSERT(m_ncGroup->setSize(r+s, 5));
+		TS_ASSERT(m_ncGroup->setSize(r+2*s, 5));
 	}
 
 	void tearDown()
@@ -90,13 +90,13 @@ public:
 
 	void testSetCollective()
 	{
-		TS_ASSERT(m_ncEntity0.setCollective(true));
+		TS_ASSERT(m_ncEntity0->setCollective(true));
 	}
 
 	void testPut()
 	{
-		TS_ASSERT(m_ncEntity0.setCollective(true));
-		TS_ASSERT(m_ncEntity1.setCollective(true));
+		TS_ASSERT(m_ncEntity0->setCollective(true));
+		TS_ASSERT(m_ncEntity1->setCollective(true));
 
 		int r = 0;
 #ifdef PARALLEL
@@ -107,14 +107,14 @@ public:
 		for (int i = 0; i < 2*5; i++)
 			values[i] = i+1000*r;
 
-		TS_ASSERT(m_ncEntity0.put(r, 5, values));
-		TS_ASSERT(m_ncEntity1.put(r, 5, values));
+		TS_ASSERT(m_ncEntity0->put(r, 5, values));
+		TS_ASSERT(m_ncEntity1->put(r, 5, values));
 	}
 
 	void testGet()
 	{
-		TS_ASSERT(m_ncEntity0.setCollective(true));
-		TS_ASSERT(m_ncEntity1.setCollective(true));
+		TS_ASSERT(m_ncEntity0->setCollective(true));
+		TS_ASSERT(m_ncEntity1->setCollective(true));
 
 		int r = 0;
 #ifdef PARALLEL
@@ -125,23 +125,23 @@ public:
 		for (int i = 0; i < 2*5; i++)
 			values[i] = i+1000*r;
 
-		TS_ASSERT(m_ncEntity0.put(r, 5, values));
-		TS_ASSERT(m_ncEntity1.put(r, 5, values));
+		TS_ASSERT(m_ncEntity0->put(r, 5, values));
+		TS_ASSERT(m_ncEntity1->put(r, 5, values));
 
 		setUpOpen();
 
-		TS_ASSERT(m_ncEntity0.setCollective(true));
-		TS_ASSERT(m_ncEntity1.setCollective(true));
+		TS_ASSERT(m_ncEntity0->setCollective(true));
+		TS_ASSERT(m_ncEntity1->setCollective(true));
 
 		for (int i = 0; i < 2*5; i++)
 			values[i] = 0;
-		TS_ASSERT(m_ncEntity1.get(r, 5, values));
+		TS_ASSERT(m_ncEntity1->get(r, 5, values));
 		for (int i = r; i < r+5; i++)
 			TS_ASSERT_EQUALS(values[i], i+1000*r);
 
 		for (int i = 0; i < 2*5; i++)
 			values[i] = 0;
-		TS_ASSERT(m_ncEntity1.get(r, values));
+		TS_ASSERT(m_ncEntity1->get(r, values));
 		for (int i = r; i < r+5; i++)
 			TS_ASSERT_EQUALS(values[i], i+1000*r);
 		// TODO check why we can't get ints as floats
@@ -158,9 +158,9 @@ private:
 		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
 #endif // PARALLEL
 
-		m_ncGroup = *m_ncPum.getGroup("testGroup");
+		m_ncGroup = m_ncPum.getGroup("testGroup");
 
-		m_ncEntity0 = *m_ncGroup.getEntity("testEntity0");
-		m_ncEntity1 = *m_ncGroup.getEntity("testEntity1");
+		m_ncEntity0 = m_ncGroup->getEntity("testEntity0");
+		m_ncEntity1 = m_ncGroup->getEntity("testEntity1");
 	}
 };

@@ -99,13 +99,14 @@ public:
 
 	void testCreateGroup()
 	{
-		PUML::NetcdfGroup ncGroup = m_ncPum.createGroup("testGroup");
-		TS_ASSERT(ncGroup.isValid());
+		PUML::NetcdfGroup* ncGroup = m_ncPum.createGroup("testGroup");
+		TS_ASSERT(ncGroup);
+		TS_ASSERT(ncGroup->isValid());
 	}
 
 	void testEndDefinition()
 	{
-		PUML::NetcdfGroup ncGroup = m_ncPum.createGroup("testGroup");
+		m_ncPum.createGroup("testGroup");
 		TS_ASSERT(m_ncPum.endDefinition());
 	}
 

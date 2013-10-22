@@ -94,12 +94,12 @@ public:
 	 * @type The type of the entity
 	 * @dimensions The dimensions of the entity (can be empty)
 	 */
-	virtual Entity& createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions) = 0;
+	virtual Entity* createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions) = 0;
 
 	/**
 	 * @overload
 	 */
-	virtual Entity& createEntity(const char* name, const Type &type, std::vector<Dimension> &dimensions)
+	virtual Entity* createEntity(const char* name, const Type &type, std::vector<Dimension> &dimensions)
 	{
 		return createEntity(name, type, dimensions.size(), &dimensions[0]);
 	}
@@ -109,7 +109,7 @@ public:
 	 *
 	 * Creates a one dimensional entity.
 	 */
-	virtual Entity& createEntity(const char* name, const Type &type)
+	virtual Entity* createEntity(const char* name, const Type &type)
 	{
 		return createEntity(name, type, 0, 0L);
 	}
@@ -123,7 +123,7 @@ public:
 	 *
 	 * @ingroup HighLevelApi
 	 */
-	Entity& createVertexEntity(CellType cellType)
+	Entity* createVertexEntity(CellType cellType)
 	{
 		int numVertices;
 
@@ -213,6 +213,18 @@ public:
 		return m_entityIndex->put(partition, size, values);
 	}
 
+	/**
+	 * Adds an index to this group
+	 * Cannot be done in the constructor because of wrong values for m_parent for the indexed entity
+	 *
+	 * @internal
+	 */
+	void addIndex(size_t indexSize)
+	{
+		m_entityIndex = _addIndex(indexSize);
+		m_entityIndex->setCollective(true);
+	}
+
 protected:
 	size_t numPartitions() const
 	{
@@ -234,13 +246,7 @@ protected:
 	 */
 	virtual bool setOffset(size_t partition) = 0;
 
-	/**
-	 * Called by the child classes for indexed groups
-	 */
-	void setEntityIndex(Entity* entity)
-	{
-		m_entityIndex = entity;
-	}
+	virtual Entity* _addIndex(size_t index) = 0;
 
 	bool indexed() const
 	{

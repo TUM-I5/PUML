@@ -70,26 +70,26 @@ public:
 	}
 #endif // PARALLEL
 
-	NetcdfGroup& createGroup(const char* name, size_t size = Group::UNLIMITED)
+	NetcdfGroup* createGroup(const char* name, size_t size = Group::UNLIMITED)
 	{
 		if (size == Group::UNLIMITED)
 			size = NC_UNLIMITED;
 
-		m_groups[name] = NetcdfGroup(name, numPartitions(), *this, *this, size);
+		NetcdfGroup group = NetcdfGroup(name, numPartitions(), *this, *this, size);
+		if (!group.isValid())
+			return 0L;
 
-		return m_groups[name];
+		m_groups[name] = group;
+
+		return &m_groups[name];
 	}
 
-	NetcdfGroup& createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
+	NetcdfGroup* createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
 	{
-		if (size == Group::UNLIMITED)
-			size = NC_UNLIMITED;
 		if (indexSize == Group::UNLIMITED)
 			indexSize = NC_UNLIMITED;
 
-		m_groups[name] = NetcdfGroup(name, numPartitions(), *this, *this, size, indexSize);
-
-		return m_groups[name];
+		return static_cast<NetcdfGroup*>(Pum::createGroupIndexed(name, size, indexSize));
 	}
 
 	NetcdfGroup* getGroup(const char* name)

@@ -86,21 +86,30 @@ public:
 	 * @param size The total size (number of all elements in all partitions) of this group.
 	 *  Use Group::UNLIMITED if unknown
 	 */
-	virtual Group& createGroup(const char* name, size_t size = Group::UNLIMITED) = 0;
+	virtual Group* createGroup(const char* name, size_t size = Group::UNLIMITED) = 0;
 
 	/**
 	 * Create an indexed group in this file
 	 *
 	 * @see createGroup
 	 */
-	virtual Group& createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED) = 0;
+	virtual Group* createGroupIndexed(const char* name, size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
+	{
+		Group* group = createGroup(name, size);
+		if (!group)
+			return 0L;
+
+		group->addIndex(indexSize);
+
+		return group;
+	}
 
 	/**
 	 * Creates a special group for vertices
 	 *
 	 * @ingroup HighLevelApi
 	 */
-	Group& createVertexGroup(size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
+	Group* createVertexGroup(size_t size = Group::UNLIMITED, size_t indexSize = Group::UNLIMITED)
 	{
 		return createGroupIndexed("vertex", size, indexSize);
 	}
@@ -110,7 +119,7 @@ public:
 	 *
 	 * @ingroup HighLevelApi
 	 */
-	Group& createCellGroup(size_t size = Group::UNLIMITED)
+	Group* createCellGroup(size_t size = Group::UNLIMITED)
 	{
 		return createGroup("cell", size);
 	}

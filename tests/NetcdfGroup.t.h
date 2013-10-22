@@ -28,7 +28,8 @@ class TestNetcdfGroup : public CxxTest::TestSuite
 {
 private:
 	PUML::NetcdfPum m_ncPum;
-	PUML::NetcdfGroup m_ncGroup;
+	PUML::NetcdfGroup* m_ncGroup;
+	PUML::NetcdfGroup* m_ncIndexedGroup;
 
 public:
 	void setUp()
@@ -39,7 +40,10 @@ public:
 		TS_ASSERT(m_ncPum.create(TEST_FILENAME, 2));
 #endif // PARALLEL
 		m_ncGroup = m_ncPum.createGroup("testGroup");
-		TS_ASSERT(m_ncGroup.isValid());
+		TS_ASSERT(m_ncGroup);
+
+		m_ncIndexedGroup = m_ncPum.createGroupIndexed("testIndexedGroup");
+		TS_ASSERT(m_ncIndexedGroup);
 	}
 
 	void tearDown()
@@ -62,20 +66,20 @@ public:
 
 	void testCreateDimension()
 	{
-		m_ncGroup.createDimension("testDim", 2);
-		TS_ASSERT(m_ncGroup.isValid());
+		m_ncGroup->createDimension("testDim", 2);
+		TS_ASSERT(m_ncGroup->isValid());
 	}
 
 	void testCreateEntity()
 	{
-		PUML::NetcdfEntity e = m_ncGroup.createEntity("testEnt", PUML::Type::Int);
-		TS_ASSERT(e.isValid());
+		PUML::NetcdfEntity* e = m_ncGroup->createEntity("testEnt", PUML::Type::Int);
+		TS_ASSERT(e);
 
 		// Entity with another dimension
-		PUML::Dimension d = m_ncGroup.createDimension("testDim", 2);
-		TS_ASSERT(m_ncGroup.isValid());
-		e = m_ncGroup.createEntity("testEntWithDim", PUML::Type::Int, 1, &d);
-		TS_ASSERT(e.isValid());
+		PUML::Dimension d = m_ncGroup->createDimension("testDim", 2);
+		TS_ASSERT(m_ncGroup->isValid());
+		e = m_ncGroup->createEntity("testEntWithDim", PUML::Type::Int, 1, &d);
+		TS_ASSERT(e);
 	}
 
 	void testSetSize()
@@ -90,11 +94,11 @@ public:
 #endif // PARALLEL
 
 		// Not the first partition -> fail
-		TS_ASSERT(!m_ncGroup.setSize(r+1, 5));
+		TS_ASSERT(!m_ncGroup->setSize(r+1, 5));
 
-		TS_ASSERT(m_ncGroup.setSize(r, 5));
-		TS_ASSERT(m_ncGroup.setSize(r+s, 5));
-		TS_ASSERT(m_ncGroup.setSize(r+2*s, 5));
+		TS_ASSERT(m_ncGroup->setSize(r, 5));
+		TS_ASSERT(m_ncGroup->setSize(r+s, 5));
+		TS_ASSERT(m_ncGroup->setSize(r+2*s, 5));
 	}
 
 	void testSize()
@@ -103,8 +107,31 @@ public:
 
 		setUpOpen();
 
-		TS_ASSERT_EQUALS(m_ncGroup.size(0), 5ul);
-		TS_ASSERT_EQUALS(m_ncGroup.size(1), 5ul);
+		TS_ASSERT_EQUALS(m_ncGroup->size(0), 5ul);
+		TS_ASSERT_EQUALS(m_ncGroup->size(1), 5ul);
+	}
+
+	void testSetIndex()
+	{
+
+		TS_ASSERT(m_ncPum.endDefinition());
+
+		int r = 0;
+		int s = 1;
+#ifdef PARALLEL
+		MPI_Comm_rank(MPI_COMM_WORLD, &r);
+		MPI_Comm_size(MPI_COMM_WORLD, &s);
+#endif // PARALLEL
+
+		// Not the first partition -> fail
+		TS_ASSERT(!m_ncIndexedGroup->setSize(r+1, 5));
+
+		TS_ASSERT(m_ncIndexedGroup->setSize(r, 5));
+		TS_ASSERT(m_ncIndexedGroup->setSize(r+s, 5));
+		TS_ASSERT(m_ncIndexedGroup->setSize(r+2*s, 5));
+
+		unsigned long index[] = {r, r+1, r+2, 2, 3};
+		TS_ASSERT(m_ncIndexedGroup->putIndex(r, 5, index));
 	}
 
 private:
@@ -118,6 +145,6 @@ private:
 		TS_ASSERT(m_ncPum.open(TEST_FILENAME));
 #endif // PARALLEL
 
-		m_ncGroup = *m_ncPum.getGroup("testGroup");
+		m_ncGroup = m_ncPum.getGroup("testGroup");
 	}
 };

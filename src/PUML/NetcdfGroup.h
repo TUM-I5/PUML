@@ -84,40 +84,6 @@ public:
 	}
 
 	/**
-	 * @param size The total size of this group. Use NC_UNLIMITED if unknown
-	 */
-	NetcdfGroup(const char* name, size_t numPartitions, NetcdfElement &ncPum, MPIElement comm,
-			size_t size, size_t indexSize)
-		: Group(name, numPartitions, comm), NetcdfElement(&ncPum)
-	{
-		int ncGroup;
-		if (checkError(nc_def_grp(ncPum.identifier(), name, &ncGroup)))
-			return;
-
-		setIdentifier(ncGroup);
-
-		if (checkError(nc_def_dim(identifier(), DIM_PARTITION, numPartitions, &m_ncDimPartition)))
-			return;
-
-		if (checkError(nc_def_dim(identifier(), DIM_SIZE, size, &m_ncDimSize)))
-			return;
-
-		if (checkError(nc_def_dim(identifier(), DIM_INDEXSIZE, indexSize, &m_ncDimIndexSize)))
-			return;
-
-		if (checkError(nc_def_var(identifier(), VAR_OFFSET, NC_UINT64, 1, &m_ncDimPartition, &m_ncVarOffset)))
-			return;
-#ifdef PARALLEL
-		if (checkError(nc_var_par_access(identifier(), m_ncVarOffset, NC_COLLECTIVE)))
-			return;
-#endif // PARALLEL
-
-		m_entityIndex = NetcdfEntity(VAR_INDEX, Type::UINT64, m_ncDimIndexSize, 0, 0L, offset(), *this);
-		m_entityIndex.setCollective(true);
-		setEntityIndex(&m_entityIndex);
-	}
-
-	/**
 	 * Constructor to load a group from the nc file
 	 *
 	 * @param ncId The netcdf identifier of the group
@@ -182,17 +148,21 @@ public:
 		return m_dimensions.back();
 	}
 
-	NetcdfEntity& createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions)
+	NetcdfEntity* createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions)
 	{
-		m_entities[name] = NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions, offset(), *this);
+		NetcdfEntity entity = NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions, offset(), *this);
+		if (!entity.isValid())
+			return 0L;
 
-		return m_entities[name];
+		m_entities[name] = entity;
+
+		return &m_entities[name];
 	}
 
 	/**
 	 * @overload
 	 */
-	NetcdfEntity& createEntity(const char* name, const Type &type, std::vector<Dimension> &dimensions)
+	NetcdfEntity* createEntity(const char* name, const Type &type, std::vector<Dimension> &dimensions)
 	{
 		return createEntity(name, type, dimensions.size(), &dimensions[0]);
 	}
@@ -200,7 +170,7 @@ public:
 	/**
 	 * @overload
 	 */
-	NetcdfEntity& createEntity(const char* name, const Type &type)
+	NetcdfEntity* createEntity(const char* name, const Type &type)
 	{
 		return createEntity(name, type, 0, 0L);
 	}
@@ -256,6 +226,16 @@ protected:
 			return false;
 
 		return true;
+	}
+
+	NetcdfEntity* _addIndex(size_t indexSize)
+	{
+		if (checkError(nc_def_dim(identifier(), DIM_INDEXSIZE, indexSize, &m_ncDimIndexSize)))
+			return 0L;
+
+		m_entityIndex = NetcdfEntity(VAR_INDEX, Type::UINT64, m_ncDimIndexSize, 0, 0L, offset(), *this);
+
+		return &m_entityIndex;
 	}
 };
 
