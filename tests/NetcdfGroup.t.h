@@ -108,7 +108,10 @@ public:
 		setUpOpen();
 
 		TS_ASSERT_EQUALS(m_ncGroup->size(0), 5ul);
+#ifdef PARALLEL
+		// _size is not set because we did not insert any values
 		TS_ASSERT_EQUALS(m_ncGroup->size(1), 5ul);
+#endif // PARALLEL
 	}
 
 	void testSetIndex()

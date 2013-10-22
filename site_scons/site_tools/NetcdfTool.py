@@ -38,9 +38,11 @@
 netcdf_prog_src = """
 #include HEADER
 
-void main() {
+int main() {
     int ncFile;
     nc_open("", 0, &ncFile);
+    
+    return 0;
 }
 """
 
