@@ -253,6 +253,14 @@ protected:
 		return m_entityIndex != 0L;
 	}
 
+	/**
+	 * Set the index entity loaded from file
+	 */
+	void setEntityIndex(Entity* entityIndex)
+	{
+		m_entityIndex = entityIndex;
+	}
+
 	void setName(const char* name)
 	{
 		m_name = name;

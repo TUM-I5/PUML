@@ -214,7 +214,6 @@ private:
 		}
 
 		return true;
-
 	}
 };
 

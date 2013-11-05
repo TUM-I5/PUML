@@ -108,32 +108,15 @@ public:
 		if (!indexed())
 			return puta((*m_offset)[partition], size, values);
 
-		std::vector<unsigned long> index(size);
-		if (!m_index->get(partition, size, &index[0]))
-			return false;
-
 		// compute position and count of values
 		std::vector<IndexedRange> valuePos;
+		size_t accesses;
+		if (!getValuePos(partition, size, valuePos, accesses))
+			return false;
 
-		valuePos.push_back({index[0], 1, 0});
-		for (size_t i = 1; i < index.size(); i++) {
-			if (index[i] == valuePos.back().pos + valuePos.back().count)
-				valuePos.back().count++;
-			else {
-				size_t localPos = valuePos.back().localPos + valuePos.back().count;
-				valuePos.push_back({index[i], 1, localPos});
-			}
-		}
 
-		// Get maximum number of access we need to get all data
-		unsigned long maxAccesses = valuePos.size();
-#ifdef PARALLEL
-		if (m_collective)
-			MPI_Allreduce(MPI_IN_PLACE, &maxAccesses, 1, MPI_UNSIGNED_LONG, MPI_MAX, mpiComm());
-#endif // PARALLEL
-
-		for (size_t i = 0; i < maxAccesses; i++) {
-			// Due to collective I/O maxAccesses might be larger than valuePos.size()
+		for (size_t i = 0; i < accesses; i++) {
+			// Due to collective I/O accesses might be larger than valuePos.size()
 			IndexedRange& v = valuePos[i % valuePos.size()];
 			if (!puta(v.pos, v.count, &values[v.localPos]))
 				return false;
@@ -148,7 +131,25 @@ public:
 		if (!isPartitionOffsetSet(partition))
 			return false;
 
-		return geta((*m_offset)[partition], size, values);
+		if (!indexed())
+			return geta((*m_offset)[partition], size, values);
+
+		std::cout << "test" << std::endl;
+
+		// compute position and count of values
+		std::vector<IndexedRange> valuePos;
+		size_t accesses;
+		if (!getValuePos(partition, size, valuePos, accesses))
+			return false;
+
+		for (size_t i = 0; i < accesses; i++) {
+			// Due to collective I/O accesses might be larger than valuePos.size()
+			IndexedRange& v = valuePos[i % valuePos.size()];
+			if (!geta(v.pos, v.count, &values[v.localPos]))
+				return false;
+		}
+
+		return true;
 	}
 
 	/**
@@ -286,6 +287,37 @@ private:
 	bool __geta(const size_t* start, const size_t* size, T* values)
 	{
 		return _geta(start, size, values);
+	}
+
+	/**
+	 * @param accesses The number of accesses we need (may differ from valuePos.size())
+	 */
+	bool getValuePos(size_t partition, size_t size, std::vector<IndexedRange> &valuePos, size_t &accesses)
+	{
+		std::vector<unsigned long> index(size);
+		if (!m_index->get(partition, size, &index[0]))
+			return false;
+
+		valuePos.push_back({index[0], 1, 0});
+		for (size_t i = 1; i < index.size(); i++) {
+			if (index[i] == valuePos.back().pos + valuePos.back().count)
+				valuePos.back().count++;
+			else {
+				size_t localPos = valuePos.back().localPos + valuePos.back().count;
+				valuePos.push_back({index[i], 1, localPos});
+			}
+		}
+
+		// Get maximum number of access we need to get all data
+		unsigned long maxAccesses = valuePos.size();
+#ifdef PARALLEL
+		if (m_collective)
+			MPI_Allreduce(MPI_IN_PLACE, &maxAccesses, 1, MPI_UNSIGNED_LONG, MPI_MAX, mpiComm());
+#endif // PARALLEL
+
+		accesses = maxAccesses;
+
+		return true;
 	}
 };
 

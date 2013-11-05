@@ -18,8 +18,6 @@
 
 #include <cxxtest/TestSuite.h>
 
-#define private public
-
 #include "PUML/NetcdfEntity.h"
 #include "PUML/NetcdfGroup.h"
 #include "PUML/NetcdfPum.h"
@@ -61,7 +59,7 @@ public:
 		m_ncIndexedGroup = m_ncPum.createGroupIndexed("testIndexedGroup");
 		TS_ASSERT(m_ncIndexedGroup);
 
-		m_ncIndexedEntity = m_ncIndexedGroup->createEntity("testEntity", PUML::Type::Int);
+		m_ncIndexedEntity = m_ncIndexedGroup->createEntity("testEntity", PUML::Type::Float);
 		TS_ASSERT(m_ncIndexedEntity);
 
 		TS_ASSERT(m_ncPum.endDefinition());
@@ -161,7 +159,10 @@ public:
 		// TODO check why we can't get ints as floats
 
 		// Indexed group
-		//TS_ASSERT(m_ncIndexedEntity->get(r, values));
+		TS_ASSERT(m_ncIndexedEntity->get(r, values));
+		for (int i = 0; i < 4; i++)
+			TS_ASSERT_EQUALS(values[i], i+1000*r);
+		TS_ASSERT_EQUALS(values[4], 42);
 	}
 
 private:

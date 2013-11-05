@@ -89,7 +89,8 @@ public:
 	 * @param ncId The netcdf identifier of the group
 	 */
 	NetcdfGroup(int ncId, NetcdfElement &ncPum, MPIElement &comm)
-		: Group(comm), NetcdfElement(ncId, &ncPum)
+		: Group(comm), NetcdfElement(ncId, &ncPum),
+		  m_ncDimIndexSize(-1)
 	{
 		char name[NC_MAX_NAME+1];
 		if (checkError(nc_inq_grpname(identifier(), name)))
@@ -101,17 +102,6 @@ public:
 
 		if (checkError(nc_inq_dimid(identifier(), DIM_SIZE, &m_ncDimSize)))
 			return;
-
-		int ncError = nc_inq_dimid(identifier(), DIM_INDEXSIZE, &m_ncDimIndexSize);
-		if (ncError == NC_EBADDIM) {
-			// Not an indexed variable
-			m_ncDimIndexSize = -1;
-		} else {
-			if (checkError(ncError))
-				return;
-
-			// TODO Indexed group
-		}
 
 		if (checkError(nc_inq_varid(identifier(), VAR_OFFSET, &m_ncVarOffset)))
 			return;
@@ -192,6 +182,22 @@ public:
 	 */
 	bool loadEntities()
 	{
+		// Get index if exists
+		int indexId = -1;
+		int ncError = nc_inq_dimid(identifier(), DIM_INDEXSIZE, &m_ncDimIndexSize);
+		if (ncError != NC_EBADDIM) {
+			if (checkError(ncError))
+				return false;
+
+			if (checkError(nc_inq_varid(identifier(), VAR_INDEX, &indexId)))
+				return false;
+
+			m_entityIndex = NetcdfEntity(indexId, offset(), 0L, *this, *this);
+
+			setEntityIndex(&m_entityIndex);
+		}
+
+		// Get other variables
 		int numVars;
 		if (checkError(nc_inq_varids(identifier(), &numVars, 0L)))
 			return false;
@@ -203,12 +209,12 @@ public:
 		for (std::vector<int>::const_iterator i = varIds.begin(); i != varIds.end(); i++) {
 			if (*i == m_ncVarOffset)
 				continue;
+			if (*i == indexId)
+				continue;
 
-			NetcdfEntity entity = NetcdfEntity(*i, offset(), 0L, *this, *this);
+			NetcdfEntity entity = NetcdfEntity(*i, offset(), (indexed() ? &m_entityIndex : 0L), *this, *this);
 			m_entities[entity.name()] = entity;
 		}
-
-		// TODO index entity
 
 		return true;
 	}
