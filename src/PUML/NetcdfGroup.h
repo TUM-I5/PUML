@@ -150,7 +150,8 @@ public:
 
 	NetcdfEntity* createEntity(const char* name, const Type &type, size_t numDimensions, Dimension* dimensions)
 	{
-		NetcdfEntity entity = NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions, offset(), *this);
+		NetcdfEntity entity = NetcdfEntity(name, type, m_ncDimSize, numDimensions, dimensions,
+				offset(), (indexed() ? &m_entityIndex : 0L), *this, *this);
 		if (!entity.isValid())
 			return 0L;
 
@@ -203,7 +204,7 @@ public:
 			if (*i == m_ncVarOffset)
 				continue;
 
-			NetcdfEntity entity = NetcdfEntity(*i, offset(), *this);
+			NetcdfEntity entity = NetcdfEntity(*i, offset(), 0L, *this, *this);
 			m_entities[entity.name()] = entity;
 		}
 
@@ -233,7 +234,7 @@ protected:
 		if (checkError(nc_def_dim(identifier(), DIM_INDEXSIZE, indexSize, &m_ncDimIndexSize)))
 			return 0L;
 
-		m_entityIndex = NetcdfEntity(VAR_INDEX, Type::UINT64, m_ncDimIndexSize, 0, 0L, offset(), *this);
+		m_entityIndex = NetcdfEntity(VAR_INDEX, Type::UINT64, m_ncDimIndexSize, 0, 0L, offset(), 0L, *this, *this);
 
 		return &m_entityIndex;
 	}

@@ -40,9 +40,9 @@ public:
 	 */
 	NetcdfEntity(const char* name, const Type &type, int dimSize,
 			size_t numUserDimensions, const Dimension* userDimensions,
-			const std::vector<size_t> &offset,
-			NetcdfElement &group)
-		: Entity(name, numUserDimensions, userDimensions, offset), NetcdfElement(&group)
+			const std::vector<size_t> &offset, NetcdfEntity* index,
+			NetcdfElement &group, MPIElement &comm)
+		: Entity(name, numUserDimensions, userDimensions, offset, index, comm), NetcdfElement(&group)
 	{
 		int ncVar;
 
@@ -61,8 +61,8 @@ public:
 	/**
 	 * Constructor to load an entity from a nc file
 	 */
-	NetcdfEntity(int ncId, const std::vector<size_t> &offset, NetcdfElement &group)
-		: Entity(offset), NetcdfElement(ncId, &group)
+	NetcdfEntity(int ncId, const std::vector<size_t> &offset, NetcdfEntity* index, NetcdfElement &group, MPIElement &comm)
+		: Entity(offset, index, comm), NetcdfElement(ncId, &group)
 	{
 		char name[NC_MAX_NAME+1];
 		if (checkError(nc_inq_varname(parentIdentifier(), identifier(), name)))

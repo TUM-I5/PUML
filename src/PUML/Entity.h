@@ -16,10 +16,12 @@
 #include <limits>
 #include <string>
 
+#include "PUML/MPIElement.h"
+
 namespace PUML
 {
 
-class Entity
+class Entity : protected MPIElement
 {
 private:
 	/** Name of this entity */
@@ -31,18 +33,36 @@ private:
 	/** Size of partition dimension (temporary) + user dimensions */
 	std::vector<size_t> m_dimSize;
 
-	/** Reference to the offset of the group */
+	/** Pointer to the offset of the group */
 	const std::vector<size_t>* m_offset;
+
+	/** Pointer to the index entity */
+	Entity* m_index;
+
+	/**
+	 * Helper structure to sum up contiguous indices
+	 */
+	struct IndexedRange
+	{
+		/** Position in the netCDF file */
+		size_t pos;
+		/** Number of continues values */
+		size_t count;
+		/** Position in the local copy of the values */
+		size_t localPos;
+	};
 
 public:
 	Entity()
-		: m_collective(false), m_offset(0L)
+		: m_collective(false), m_offset(0L), m_index(0L)
 	{
 	}
 
-	Entity(const char* name, size_t numUserDimensions, const Dimension* userDimensions, const std::vector<size_t> &offset)
-		: m_name(name), m_collective(false),
-		  m_dimSize(numUserDimensions+1), m_offset(&offset)
+	Entity(const char* name, size_t numUserDimensions, const Dimension* userDimensions,
+			const std::vector<size_t> &offset, Entity* index, MPIElement &comm)
+		: MPIElement(comm),
+		  m_name(name), m_collective(false),
+		  m_dimSize(numUserDimensions+1), m_offset(&offset), m_index(index)
 	{
 		for (size_t i = 0; i < numUserDimensions; i++) {
 			// Set the size of the user dimension, we need them later
@@ -53,8 +73,9 @@ public:
 	/**
 	 * Constructor for loading an entity from file
 	 */
-	Entity(const std::vector<size_t> &offset)
-		: m_collective(false), m_offset(&offset)
+	Entity(const std::vector<size_t> &offset, Entity* index, MPIElement &comm)
+		: MPIElement(comm),
+		  m_collective(false), m_offset(&offset), m_index(index)
 	{
 	}
 
@@ -84,7 +105,41 @@ public:
 		if (!isPartitionOffsetSet(partition))
 			return false;
 
-		return puta((*m_offset)[partition], size, values);
+		if (!indexed())
+			return puta((*m_offset)[partition], size, values);
+
+		std::vector<unsigned long> index(size);
+		if (!m_index->get(partition, size, &index[0]))
+			return false;
+
+		// compute position and count of values
+		std::vector<IndexedRange> valuePos;
+
+		valuePos.push_back({index[0], 1, 0});
+		for (size_t i = 1; i < index.size(); i++) {
+			if (index[i] == valuePos.back().pos + valuePos.back().count)
+				valuePos.back().count++;
+			else {
+				size_t localPos = valuePos.back().localPos + valuePos.back().count;
+				valuePos.push_back({index[i], 1, localPos});
+			}
+		}
+
+		// Get maximum number of access we need to get all data
+		unsigned long maxAccesses = valuePos.size();
+#ifdef PARALLEL
+		if (m_collective)
+			MPI_Allreduce(MPI_IN_PLACE, &maxAccesses, 1, MPI_UNSIGNED_LONG, MPI_MAX, mpiComm());
+#endif // PARALLEL
+
+		for (size_t i = 0; i < maxAccesses; i++) {
+			// Due to collective I/O maxAccesses might be larger than valuePos.size()
+			IndexedRange& v = valuePos[i % valuePos.size()];
+			if (!puta(v.pos, v.count, &values[v.localPos]))
+				return false;
+		}
+
+		return true;
 	}
 
 	template<typename T>
@@ -214,6 +269,11 @@ private:
 	size_t partitionSize(size_t partition)
 	{
 		return (*m_offset)[partition+1] - (*m_offset)[partition];
+	}
+
+	bool indexed() const
+	{
+		return m_index != 0L;
 	}
 
 	template<typename T>
