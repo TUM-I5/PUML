@@ -134,8 +134,6 @@ public:
 		if (!indexed())
 			return geta((*m_offset)[partition], size, values);
 
-		std::cout << "test" << std::endl;
-
 		// compute position and count of values
 		std::vector<IndexedRange> valuePos;
 		size_t accesses;
