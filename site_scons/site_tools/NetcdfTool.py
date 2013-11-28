@@ -11,8 +11,8 @@
 # @author Sebastian Rettenberger <rettenbs@in.tum.de>
 #
 
-netcdf_prog_src = """
-#include HEADER
+netcdf_prog_src_serial = """
+#include <netcdf.h>
 
 int main() {
     int ncFile;
@@ -22,9 +22,24 @@ int main() {
 }
 """
 
-def CheckNetcdfLinking(context, header, message):
+netcdf_prog_src_parallel = """
+#include <netcdf_par.h>
+
+int main() {
+    int ncFile;
+    nc_open_par("", 0, MPI_COMM_WORLD, MPI_INFO_NULL, &ncFile);
+    
+    return 0;
+}
+"""
+
+def CheckNetcdfLinking(context, parallel, message):
     context.Message(message+"... ")
-    ret = context.TryLink(netcdf_prog_src.replace('HEADER', '<'+header+'>', 1), '.c')
+    if parallel:
+        src = netcdf_prog_src_parallel
+    else:
+        src = netcdf_prog_src_serial
+    ret = context.TryLink(src, '.c')
     context.Result(ret)
     
     return ret
@@ -33,8 +48,10 @@ def generate(env, **kw):
     conf = env.Configure(custom_tests = {'CheckNetcdfLinking' : CheckNetcdfLinking})
     
     if 'parallel' in kw and kw['parallel']:
+        parallel = True
         header = 'netcdf_par.h'
     else:
+        parallel = False
         header = 'netcdf.h'
         
     if 'required' in kw:
@@ -47,9 +64,10 @@ def generate(env, **kw):
             print 'Could not find netCDF!'
             env.Exit(1)
         else:
+            conf.Finish()
             return
         
-    ret = conf.CheckNetcdfLinking(header, "Checking whether shared netCDF library is used")
+    ret = conf.CheckNetcdfLinking(parallel, "Checking whether shared netCDF library is used")
     if not ret:
         # Static library, link with HDF5 and zlib as well
         ret = [conf.CheckLib(lib) for lib in ['hdf5_hl', 'hdf5', 'z']]
@@ -59,19 +77,23 @@ def generate(env, **kw):
                 print 'Could not find HDF5 or zlib!'
                 env.Exit(1)
             else:
+                conf.Finish()
                 return
 
         # Try to find all additional libraries
         conf.CheckLib('curl')
         conf.CheckLib('gpfs')
 
-        ret = conf.CheckNetcdfLinking(header, "Checking wheater all netCDF dependencies are found")
+        ret = conf.CheckNetcdfLinking(parallel, "Checking whether all netCDF dependencies are found")
         if not ret:
             if required:
                 print 'Could not find all netCDF dependencies!'
                 env.Exit(1)
             else:
+                conf.Finish()
                 return
+            
+    conf.Finish()
 
 def exists(env):
     return True
