@@ -296,13 +296,15 @@ private:
 		if (!m_index->get(partition, size, &index[0]))
 			return false;
 
-		valuePos.push_back({index[0], 1, 0});
+		IndexedRange range = {index[0], 1, 0};
+		valuePos.push_back(range);
 		for (size_t i = 1; i < index.size(); i++) {
 			if (index[i] == valuePos.back().pos + valuePos.back().count)
 				valuePos.back().count++;
 			else {
 				size_t localPos = valuePos.back().localPos + valuePos.back().count;
-				valuePos.push_back({index[i], 1, localPos});
+				IndexedRange range2 = {index[i], 1, localPos};
+				valuePos.push_back(range2);
 			}
 		}
 
