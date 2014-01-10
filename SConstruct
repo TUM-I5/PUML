@@ -139,7 +139,8 @@ env.Append(CXXFLAGS = ['-Wall', '-ansi', '-std=c++0x'])
 if env['compileMode'] == 'debug':
   env.Append(CXXFLAGS=['-O0','-g'])
 elif env['compileMode'] == 'release':
-  env.Append(CXXFLAGS = ['-DNDEBUG', '-O2'])
+  env.Append(CPPDEFINES=['NDEBUG'])
+  env.Append(CXXFLAGS=['-O2'])
 
 # add pathname to the list of directories which are search for include
 env.Append(CPPPATH=['#/src'])
@@ -164,20 +165,39 @@ if env['parallelization'] != 'mpi':
 
 # build directory
 env['libFile'] = env['buildDir']+'/'+lib_name
+env['execDir'] = env['buildDir']+'/bin'
 env['buildDir'] = env['buildDir']+'/build_'+lib_name
 
+# setup additional dependencies for tools
+env.tools = env.Clone()
+env.tools.Append(CPPPATH=['#/submodules'])
+env.tools.Append(LIBS=[os.path.split(env['libFile'])[1]])
+env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
+env.tools.Append(CXXFLAGS = ['-fopenmp'])
+env.tools.Append(LINKFLAGS= ['-fopenmp'])
+# ParMETIS
+env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
+
 # get the source files
-env.sourceFiles = []
+env.sourceFiles = {}
+env.sourceFiles['lib'] = []
 
 Export('env')
 SConscript('src/SConscript', variant_dir='#/'+env['buildDir'], src_dir='#/', duplicate=0)
 Import('env')
 
 # build standard version
-env.StaticLibrary('#/'+env['libFile'], env.sourceFiles)
+env.StaticLibrary('#/'+env['libFile'], env.sourceFiles['lib'])
+
+# build tools
+env.tools.Program('#/'+env['execDir']+'/pumgen', env.sourceFiles['pumgen'])
 
 # build unit tests
 if env['unitTests'] != 'none':
+  # Some MPI version requires this flag
+  if env['parallelization'] == 'mpi':
+    env.Append(CPPDEFINES=['MPICH_IGNORE_CXX_SEEK'])
+
   # define location of cxxtest
   env['CXXTEST'] = 'submodules/cxxtest'
  
@@ -193,7 +213,7 @@ if env['unitTests'] != 'none':
   env.Tool('cxxtest', toolpath=[env['CXXTEST']+'/build_tools/SCons'])
    
   # Get test source files
-  env.testSourceFiles = []
+  env.sourceFiles['tests'] = []
   
   Export('env')
   SConscript('tests/SConscript', variant_dir='#/'+env['buildDir']+'/tests', src_dir='#/')
@@ -201,4 +221,4 @@ if env['unitTests'] != 'none':
 
   # build unit tests
   env.CxxTest(target='#/'+env['buildDir']+'/tests/cxxtest_runner',
-              source=env.sourceFiles+env.testSourceFiles)
+              source=env.sourceFiles['lib']+env.sourceFiles['tests'])

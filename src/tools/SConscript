@@ -11,14 +11,12 @@
 # @author Sebastian Rettenberger <rettenbs@in.tum.de>
 #
 
-import os
-
 Import('env')
 
-env.sourceFiles['tests'].extend(
-    [os.path.abspath('NetcdfPum.t.h'),  # Must be the first
-     os.path.abspath('NetcdfGroup.t.h'),
-     os.path.abspath('NetcdfEntity.t.h')]
-  )
+env.sourceFiles['pumgen'] = [env.tools.Object('pumgen.cpp')]
+
+Export('env')
+SConscript('meshreader/SConscript', variant_dir='#/'+env['buildDir']+'/src', src_dir='#/src', duplicate=0)
+Import('env')
 
 Export('env')

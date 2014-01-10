@@ -13,10 +13,14 @@
 
 Import('env')
 
-env.sourceFiles.extend(
+env.sourceFiles['lib'].extend(
     [env.Object('Group.cpp'),
      env.Object('Pum.cpp'),
      env.Object('Type.cpp')]
   )
+
+Export('env')
+SConscript('tools/SConscript', variant_dir='#/'+env['buildDir']+'/src', src_dir='#/src', duplicate=0)
+Import('env')
 
 Export('env')
