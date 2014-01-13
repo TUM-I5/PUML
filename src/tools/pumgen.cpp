@@ -1016,8 +1016,8 @@ int main(int argc, char* argv[])
 				// Get the vertices
 #ifdef PARALLEL
 				MPI_Win_lock(MPI_LOCK_SHARED, j->first / nMaxLocalVertices, MPI_MODE_NOCHECK, verticesWindow);
-				MPI_Get(&localVertices[j->second*3], 3, MPI_LONG,
-						j->first / nMaxLocalVertices, (j->first % nMaxLocalVertices)*3, 3, MPI_LONG,
+				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
+						j->first / nMaxLocalVertices, (j->first % nMaxLocalVertices)*3, 3, MPI_DOUBLE,
 						verticesWindow);
 				MPI_Win_unlock(j->first / nMaxLocalVertices, verticesWindow);
 #else // PARALLEL
