@@ -21,6 +21,17 @@
 #include "utils/logger.h"
 
 /**
+ * Describes the group of an element
+ */
+struct ElementGroup
+{
+	/** The element */
+	unsigned int element;
+	/** The group for this element */
+	unsigned int group;
+};
+
+/**
  * Describes a boundary face
  */
 struct BoundaryFace
@@ -55,8 +66,8 @@ private:
 	struct GroupSection : GambitSection {
 		/** Size per element id */
 		size_t elementSize;
-		/** Material type */
-		int material;
+		/** Group number */
+		int group;
 	};
 
 	struct BoundarySection : GambitSection {
@@ -180,7 +191,7 @@ public:
 			std::string y;
 			std::istringstream ss(line);
 			ss >> y;
-			ss >> m_groups[i].material;
+			ss >> m_groups[i].group;
 			ss >> y;
 			ss >> m_groups[i].nLines;	// This is not the actual number of lines
 										// Because Gambit stores more than one element
@@ -327,6 +338,41 @@ public:
 		}
 
 		delete [] buf;
+	}
+
+	/**
+	 * Reads group number for elements from start to start+count
+	 *
+	 * @param group Buffer for storing the group numbers. The caller is responsible
+	 *  for allocating the buffer.
+	 */
+	void readGroups(unsigned int start, unsigned int count, ElementGroup* group)
+	{
+		m_mesh.clear();
+
+		// Get the group, were we should start reading
+		std::vector<GroupSection>::const_iterator section;
+		for (section = m_groups.begin();
+				section != m_groups.end() && section->nLines < start; section++)
+			start -= section->nLines;
+
+		m_mesh.seekg(section->seekPosition + (start / ELEMENTS_PER_LINE_GROUP) * section->lineSize
+				+ (start % ELEMENTS_PER_LINE_GROUP) * section->elementSize);
+
+		for (unsigned int i = 0; i < count; i++) {
+			m_mesh >> group[i].element;
+			group[i].element--;
+			group[i].group = section->group;
+
+			start++;
+			// May need to jump from one section to the next
+			if (start >= section->nLines) {
+				start = 0;
+				section++;
+
+				m_mesh.seekg(section->seekPosition);
+			}
+		}
 	}
 
 	/**

@@ -41,6 +41,8 @@ struct Element {
 	unsigned int id;
 	/** Vertex ids */
 	unsigned int vertex[4];
+	/** The group number */
+	unsigned int group;
 
 	/**
 	 * Compare elements by the global id
@@ -386,6 +388,49 @@ int main(int argc, char* argv[])
 	METIS_Free(xadj);
 	METIS_Free(adjncy);
 
+	// Read and distribute group information
+	unsigned int* elementGroups;
+#ifdef PARALLEL
+	MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements, MPI_INFO_NULL, &elementGroups);
+
+	MPI_Win groupWindow;
+	MPI_Win_create(elementGroups, sizeof(unsigned int)*nLocalElements, sizeof(unsigned int),
+			MPI_INFO_NULL, MPI_COMM_WORLD, &groupWindow);
+#else // PARALLEL
+	elementGroups = new unsigned int[nLocalElements];
+#endif // PARALLEL
+
+
+	if (rank == 0) {
+#ifdef PARALLEL
+		ElementGroup* groups = new ElementGroup[nLocalElements];
+
+		// Read the group and put the on the other processes
+		for (int i = 0; i < processes; i++) {
+			unsigned int count = nLocalElements;
+			if (i == processes-1)
+				count = nElements - (processes-1) * nLocalElements;
+
+			logInfo() << "Reading group information part" << (i+1) << "of" << processes;
+			gambitReader.readGroups(i * nLocalElements, count, groups);
+			for (unsigned int j = 0; j < count; j++) {
+				MPI_Win_lock(MPI_LOCK_EXCLUSIVE, groups[j].element / nLocalElements, MPI_MODE_NOCHECK, groupWindow);
+				MPI_Put(&groups[j].group, 1, MPI_UNSIGNED, groups[j].element / nLocalElements, groups[j].element % nLocalElements,
+						1, MPI_UNSIGNED, groupWindow);
+				MPI_Win_unlock(groups[j].element / nLocalElements, groupWindow);
+			}
+		}
+
+		delete [] groups;
+#else // PARALLEL
+		// TODO
+#endif // PARALLEL
+	}
+
+#ifdef PARALLEL
+	MPI_Win_free(&groupWindow);
+#endif // PARALLEL
+
 	logInfo(rank) << "Redistributing elements";
 	unsigned int nMaxLocalPart = (nPartitions + processes - 1) / processes;
 	unsigned int nLocalPart = nMaxLocalPart;
@@ -440,6 +485,7 @@ int main(int argc, char* argv[])
 			// Set global id
 			sendElements[pos].id = elementPerPart[i][j] + nMaxLocalElements * rank;
 			memcpy(sendElements[pos].vertex, &elements[elementPerPart[i][j]*4], sizeof(unsigned int)*4);
+			sendElements[pos].group = elementGroups[elementPerPart[i][j]];
 			pos++;
 		}
 	}
@@ -468,12 +514,14 @@ int main(int argc, char* argv[])
 	Element* recvElements = new Element[recvSum];
 
 	// Create the MPI datatype
-	int blockLength[] = {1, 4, 1};
+	int blockLength[] = {1, 4, 1, 1};
 	MPI_Aint displacement[] = {0, reinterpret_cast<uintptr_t>(recvElements[0].vertex)
+			- reinterpret_cast<uintptr_t>(&recvElements[0]),
+			reinterpret_cast<uintptr_t>(&recvElements[0].group)
 			- reinterpret_cast<uintptr_t>(&recvElements[0]), sizeof(Element)};
-	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UB};
+	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UNSIGNED, MPI_UB};
 	MPI_Datatype elementType;
-	MPI_Type_create_struct(3, blockLength, displacement, type, &elementType);
+	MPI_Type_create_struct(4, blockLength, displacement, type, &elementType);
 	MPI_Type_commit(&elementType);
 
 	MPI_Alltoallv(sendElements, sendcounts, senddispls, elementType,
@@ -489,6 +537,11 @@ int main(int argc, char* argv[])
 
 	delete [] nElementPerPart;
 	delete [] elementPerPart;
+#ifdef PARALLEL
+	MPI_Free_mem(elementGroups);
+#else // PARALLEL
+	delete [] elementGroups;
+#endif // PARALLEL
 
 	// Compute the size of each local partition
 	unsigned int* partSize = new unsigned int[nLocalPart];
@@ -816,6 +869,11 @@ int main(int argc, char* argv[])
 	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++)
 		memcpy(&localPartElemVrtx[i*4], localPartElements[i].vertex, sizeof(unsigned int)*4);
 
+	// Create element group buffer
+	unsigned int* localPartElemGroup = new unsigned int[localPartPtr[nLocalPart]];
+	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++)
+		localPartElemGroup[i] = localPartElements[i].group;
+
 	logInfo(rank) << "Creating netCDF file";
 	// TODO create netCDF file with a new PUML format
 	int ncFile;
@@ -879,6 +937,10 @@ int main(int argc, char* argv[])
 	checkNcError(nc_def_var(ncFile, "element_mpi_indices", NC_INT, 3, dimsElemSides, &ncVarElemMPIIndices));
 	checkNcError(nc_var_par_access(ncFile, ncVarElemMPIIndices, NC_COLLECTIVE));
 
+	int ncVarElemGroup;
+	checkNcError(nc_def_var(ncFile, "element_group", NC_INT, 2, dimsElemSides, &ncVarElemGroup));
+	checkNcError(nc_var_par_access(ncFile, ncVarElemGroup, NC_COLLECTIVE));
+
 	int ncVarVrtxSize;
 	checkNcError(nc_def_var(ncFile, "vertex_size", NC_INT, 1, &ncDimPart, &ncVarVrtxSize));
 	checkNcError(nc_var_par_access(ncFile, ncVarVrtxSize, NC_COLLECTIVE));
@@ -923,6 +985,7 @@ int main(int argc, char* argv[])
 		checkNcError(nc_put_vara_uint(ncFile, ncVarElemSideOrientations, start, count, &localPartElemNbOrient[localPartPtr[j]*4]));
 		checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighborRanks, start, count, &localPartElemRanks[localPartPtr[j]*4]));
 		checkNcError(nc_put_vara_uint(ncFile, ncVarElemMPIIndices, start, count, &localPartElemMPI[localPartPtr[j]*4]));
+		checkNcError(nc_put_vara_uint(ncFile, ncVarElemGroup, start, count, &localPartElemGroup[localPartPtr[j]]));
 	}
 
 	// Delete data we have already written to disk
@@ -933,6 +996,7 @@ int main(int argc, char* argv[])
 	delete [] localPartElemBoundary;
 	delete [] localPartElemRanks;
 	delete [] localPartElemMPI;
+	delete [] localPartElemGroup;
 
 #ifdef PARALLEL
 	MPI_Win_free(&elementWindow);
