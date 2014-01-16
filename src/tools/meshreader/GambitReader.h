@@ -14,6 +14,7 @@
 #define GAMBIT_READER_H
 
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <vector>
 
