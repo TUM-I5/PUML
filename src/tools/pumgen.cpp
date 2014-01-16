@@ -1187,6 +1187,8 @@ int main(int argc, char* argv[])
 
 	checkNcError(nc_close(ncFile));
 
+	logInfo(rank) << "Finished succefully";
+
 #ifdef PARALLEL
 	MPI_Finalize();
 #endif // PARALLEL
