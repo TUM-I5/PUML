@@ -76,6 +76,10 @@ private:
 		int type;
 		/** Size per element id (only fixed line length) */
 		size_t elementSize;
+		/** Size per element type (only fixed line length) */
+		size_t elementTypeSize;
+		/** Size per face id (only fixed line length) */
+		size_t faceSize;
 		/** Is line length variable? */
 		bool variableLineLength;
 	};
@@ -253,9 +257,16 @@ public:
 
 			// Get element size
 			std::istringstream ssE(line);
-			unsigned int element;
+			unsigned int element, type, face;
 			ssE >> element;
 			m_boundaries[i].elementSize = ssE.tellg();
+			ssE >> type;
+			m_boundaries[i].elementTypeSize = static_cast<size_t>(ssE.tellg()) - m_boundaries[i].elementSize;
+			ssE >> face;
+			if (ssE.tellg() == -1)
+				m_boundaries[i].faceSize = line.length() - m_boundaries[i].elementSize - m_boundaries[i].elementTypeSize;
+			else
+				m_boundaries[i].faceSize = static_cast<size_t>(ssE.tellg()) - m_boundaries[i].elementSize - m_boundaries[i].elementTypeSize;
 
 			m_mesh.seekg(m_boundaries[i].seekPosition
 					+ m_boundaries[i].nLines * m_boundaries[i].lineSize);
@@ -388,8 +399,13 @@ public:
 		m_mesh.seekg(section->seekPosition + (start / ELEMENTS_PER_LINE_GROUP) * section->lineSize
 				+ (start % ELEMENTS_PER_LINE_GROUP) * section->elementSize);
 
+		char* buf = new char[section->elementSize];
+
 		for (unsigned int i = 0; i < count; i++) {
-			m_mesh >> group[i].element;
+			m_mesh.read(buf, section->elementSize);
+
+			std::istringstream ss(std::string(buf, section->elementSize));
+			ss >> group[i].element;
 			group[i].element--;
 			group[i].group = section->group;
 
@@ -400,8 +416,13 @@ public:
 				section++;
 
 				m_mesh.seekg(section->seekPosition);
-			}
+			} else if (start % ELEMENTS_PER_LINE_GROUP == 0)
+				// Skip newline char at end of line
+				m_mesh.seekg(section->lineSize - section->elementSize * ELEMENTS_PER_LINE_GROUP,
+					std::fstream::cur);
 		}
+
+		delete [] buf;
 	}
 
 	/**
@@ -430,7 +451,7 @@ public:
 
 		char* buf;
 		if (section->lineSize > 0)
-			buf = new char[section->elementSize + ELEMENT_TYPE + FACE_SIZE];
+			buf = new char[section->elementSize + section->elementTypeSize + section->faceSize];
 		else
 			buf = 0;
 
@@ -441,16 +462,16 @@ public:
 				m_mesh >> elementType;
 				m_mesh >> boundaries[i].face;
 			} else {
-				m_mesh.read(buf, section->elementSize + ELEMENT_TYPE + FACE_SIZE);
+				m_mesh.read(buf, section->elementSize + section->elementTypeSize + section->faceSize);
 
 				std::istringstream ssE(std::string(buf, section->elementSize));
 				ssE >> boundaries[i].element;
 
-				std::istringstream ssF(std::string(&buf[section->elementSize + ELEMENT_TYPE], FACE_SIZE));
+				std::istringstream ssF(std::string(&buf[section->elementSize + section->elementTypeSize], section->faceSize));
 				ssF >> boundaries[i].face;
 
 				// Seek to next position
-				m_mesh.seekg(section->lineSize - (section->elementSize + ELEMENT_TYPE + FACE_SIZE),
+				m_mesh.seekg(section->lineSize - (section->elementSize + section->elementTypeSize + section->faceSize),
 						std::fstream::cur);
 			}
 
@@ -467,7 +488,7 @@ public:
 
 				delete [] buf;
 				if (section->lineSize > 0)
-					buf = new char[section->elementSize + ELEMENT_TYPE + FACE_SIZE];
+					buf = new char[section->elementSize + section->elementTypeSize + section->faceSize];
 				else
 					buf = 0;
 			}
@@ -499,10 +520,6 @@ private:
 	static const size_t COORDINATE_SIZE = 20ul;
 	/** Number of elements stored in one group line */
 	static const size_t ELEMENTS_PER_LINE_GROUP = 10ul;
-	/** Number of characters required to store an element type */
-	static const size_t ELEMENT_TYPE = 5ul;
-	/** Number of characters required to store a face id */
-	static const size_t FACE_SIZE = 5ul;
 
 	static const char* GAMBIT_FILE_ID;
 	static const char* ENDSECTION;
