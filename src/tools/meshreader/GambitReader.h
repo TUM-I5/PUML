@@ -73,6 +73,8 @@ private:
 	struct BoundarySection : GambitSection {
 		/** Type of the boundary */
 		int type;
+		/** Is line length variable? */
+		bool variableLineLength;
 	};
 
 	std::ifstream m_mesh;
@@ -230,6 +232,8 @@ public:
 			getline(m_mesh, line);
 			if (line.find(BOUNDARY_CONDITIONS) == std::string::npos)
 				logError() << "Invalid Gambit format: Boundaries expected, found" << line;
+			m_boundaries[i].variableLineLength = false;
+
 			getline(m_mesh, line);
 			m_boundaries[i].seekPosition = m_mesh.tellg();
 
@@ -240,6 +244,7 @@ public:
 			ss >> x;
 			ss >> m_boundaries[i].nLines;
 
+			// Try boundary with fixed line length
 			getline(m_mesh, line);
 			m_boundaries[i].lineSize = line.size() + 1;
 
@@ -248,8 +253,22 @@ public:
 
 			getline(m_mesh, line);
 			utils::StringUtils::rtrim(line); // remove \r
-			if (line != ENDSECTION)
-				logError() << "Invalid Gambit format: End of boundaries expected, found" << line;
+			if (line != ENDSECTION) {
+				logWarning() << "Gambit format does not seem to have a fixed boundary line length. Trying with variable line length";
+
+				m_boundaries[i].variableLineLength = true;
+				m_boundaries[i].lineSize = 0; // Variable line size
+
+				m_mesh.seekg(m_boundaries[i].seekPosition);
+
+				for (size_t j = 0; j < m_boundaries[i].nLines; j++)
+					m_mesh.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+				getline(m_mesh, line);
+				utils::StringUtils::rtrim(line); // remove \r
+				if (line != ENDSECTION)
+					logError() << "Invalid Gambit format: End of boundaries expected, found" << line;
+			}
 		}
 	}
 
@@ -392,21 +411,46 @@ public:
 				section != m_boundaries.end() && section->nLines < start; section++)
 			start -= section->nLines;
 
-		m_mesh.seekg(section->seekPosition + start * section->lineSize);
+		if (section->lineSize > 0)
+			// Fixed line size
+			m_mesh.seekg(section->seekPosition + start * section->lineSize);
+		else {
+			// Variable line size
+			m_mesh.seekg(section->seekPosition);
+			for (size_t i = 0; i < start; i++)
+				m_mesh.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+		}
 
-		char* buf = new char[ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE];
+		char* buf;
+		if (section->lineSize > 0)
+			buf = new char[ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE];
+		else
+			buf = 0;
 
 		for (unsigned int i = 0; i < count; i++) {
-			m_mesh.read(buf, ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE);
+			if (section->lineSize > 0) {
+				// Fixed line size
+				m_mesh.read(buf, ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE);
 
-			std::istringstream ssE(std::string(buf, ELEMENT_SIZE_BOUNDARY));
-			ssE >> boundaries[i].element;
+				std::istringstream ssE(std::string(buf, ELEMENT_SIZE_BOUNDARY));
+				ssE >> boundaries[i].element;
+
+				std::istringstream ssF(std::string(&buf[ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE], FACE_SIZE));
+				ssF >> boundaries[i].face;
+
+				// Seek to next position
+				m_mesh.seekg(section->lineSize - (ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE),
+						std::fstream::cur);
+			} else {
+				// Variable line size
+				unsigned int elementType; // Ignored
+				m_mesh >> boundaries[i].element;
+				m_mesh >> elementType;
+				m_mesh >> boundaries[i].face;
+			}
+
 			boundaries[i].element--;
-
-			std::istringstream ssF(std::string(&buf[ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE], FACE_SIZE));
-			ssF >> boundaries[i].face;
 			boundaries[i].face = face2internal(boundaries[i].face);
-
 			boundaries[i].type = section->type;
 
 			start++; // Line in the current section
@@ -415,9 +459,12 @@ public:
 				section++;
 
 				m_mesh.seekg(section->seekPosition);
-			} else {
-				m_mesh.seekg(section->lineSize - (ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE),
-						std::fstream::cur);
+
+				delete [] buf;
+				if (section->lineSize > 0)
+					buf = new char[ELEMENT_SIZE_BOUNDARY + ELEMENT_TYPE + FACE_SIZE];
+				else
+					buf = 0;
 			}
 		}
 
@@ -448,6 +495,7 @@ private:
 	/** Number of elements stored in one group line */
 	static const size_t ELEMENTS_PER_LINE_GROUP = 10ul;
 	/** Number of characters required to store an element id in boundary conditions */
+	// TODO check if this is always 10!!
 	static const size_t ELEMENT_SIZE_BOUNDARY = 10ul;
 	/** Number of characters required to store an element type */
 	static const size_t ELEMENT_TYPE = 5ul;
