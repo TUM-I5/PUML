@@ -192,6 +192,9 @@ int main(int argc, char* argv[])
 			if (nPartitions == 0)
 				logError() << "Partitions created must be greater than zero";
 
+			if (nPartitions < ((nPartitions + processes - 1) / processes) * processes)
+				logError() << "Not every process will get at least one partition, use a smaller number of ranks";
+
 #ifdef PARALLEL
 			int constants[] = {nPartitions, static_cast<int>(outputFile.size())};
 			MPI_Bcast(constants, 2, MPI_INT, 0, MPI_COMM_WORLD);
