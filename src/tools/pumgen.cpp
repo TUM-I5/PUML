@@ -192,7 +192,7 @@ int main(int argc, char* argv[])
 			if (nPartitions == 0)
 				logError() << "Partitions created must be greater than zero";
 
-			if (nPartitions < ((nPartitions + processes - 1) / processes) * processes)
+			if (nPartitions <= ((nPartitions + processes - 1) / processes) * (processes-1))
 				logError() << "Not every process will get at least one partition, use a smaller number of ranks";
 
 #ifdef PARALLEL
