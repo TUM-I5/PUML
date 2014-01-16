@@ -640,7 +640,7 @@ int main(int argc, char* argv[])
 						1, MPI_UNSIGNED, boundaryWindow);
 				MPI_Win_unlock(boundaryFaces[j].element / nMaxLocalElements, boundaryWindow);
 #else // PARALLEL
-				boundaries[boundaryFaces[j].element % nMaxLocalElements)*4 + boundaryFaces[j].face] = boundaryFaces[j].type;
+				boundaries[(boundaryFaces[j].element % nMaxLocalElements)*4 + boundaryFaces[j].face] = boundaryFaces[j].type;
 #endif // PARALLEL
 			}
 		}
