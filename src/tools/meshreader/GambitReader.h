@@ -442,20 +442,35 @@ public:
 				section != m_boundaries.end() && section->nLines < start; section++)
 			start -= section->nLines;
 
+		char* buf;
+
 		if (section->variableLineLength) {
 			m_mesh.seekg(section->seekPosition);
 			for (size_t i = 0; i < start; i++)
 				m_mesh.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-		} else
+
+			buf = 0L;
+		} else {
 			m_mesh.seekg(section->seekPosition + start * section->lineSize);
 
-		char* buf;
-		if (section->lineSize > 0)
 			buf = new char[section->elementSize + section->elementTypeSize + section->faceSize];
-		else
-			buf = 0;
+		}
 
 		for (unsigned int i = 0; i < count; i++) {
+			if (start >= section->nLines) {
+				// Are we starting a new section in this iteration?
+				start = 0;
+				section++;
+
+				m_mesh.seekg(section->seekPosition);
+
+				delete [] buf;
+				if (section->variableLineLength)
+					buf = 0L;
+				else
+					buf = new char[section->elementSize + section->elementTypeSize + section->faceSize];
+			}
+
 			if (section->variableLineLength) {
 				unsigned int elementType; // Ignored
 				m_mesh >> boundaries[i].element;
@@ -480,18 +495,6 @@ public:
 			boundaries[i].type = section->type;
 
 			start++; // Line in the current section
-			if (start >= section->nLines) {
-				start = 0;
-				section++;
-
-				m_mesh.seekg(section->seekPosition);
-
-				delete [] buf;
-				if (section->lineSize > 0)
-					buf = new char[section->elementSize + section->elementTypeSize + section->faceSize];
-				else
-					buf = 0;
-			}
 		}
 
 		delete [] buf;
