@@ -614,6 +614,7 @@ int main(int argc, char* argv[])
 #else // PARALLEL
 	boundaries = new unsigned int[nLocalElements*4];
 #endif // PARELLEL
+	memset(boundaries, 0, sizeof(unsigned int)*nLocalElements*4);
 	if (rank == 0) {
 		// Rank 0 does all the reading and distributes the contents
 
@@ -680,7 +681,6 @@ int main(int argc, char* argv[])
 	unsigned int* localPartElemNbOrient = new unsigned int[localPartPtr[nLocalPart]*4];
 	memset(localPartElemNbOrient, 0, sizeof(unsigned int)*4*localPartPtr[nLocalPart]);
 	unsigned int* localPartElemBoundary = new unsigned int[localPartPtr[nLocalPart]*4];
-	memset(localPartElemBoundary, 0, sizeof(unsigned int)*4*localPartPtr[nLocalPart]);
 	int* localPartElemRanks = new int[localPartPtr[nLocalPart]*4];
 	std::map<unsigned int, std::vector<MPINeighborElement> >* boundaryMaps
 		= new std::map<unsigned int, std::vector<MPINeighborElement> >[nLocalPart];
@@ -698,8 +698,16 @@ int main(int argc, char* argv[])
 				localPartElements[i].id / nMaxLocalElements, (localPartElements[i].id % nMaxLocalElements)*4, 4, MPI_INT,
 				elementNbWindow);
 		MPI_Win_unlock(localPartElements[i].id / nMaxLocalElements, elementNbWindow);
+
+		// Set boundary (do this for all boundaries, because of inner boundary conditions)
+		MPI_Win_lock(MPI_LOCK_SHARED, localPartElements[i].id / nMaxLocalElements, MPI_MODE_NOCHECK, boundaryWindow);
+		MPI_Get(&localPartElemBoundary[i*4], 4, MPI_UNSIGNED,
+				localPartElements[i].id / nMaxLocalElements, (localPartElements[i].id % nMaxLocalElements)*4, 4, MPI_UNSIGNED,
+				boundaryWindow);
+		MPI_Win_unlock(localPartElements[i].id / nMaxLocalElements, boundaryWindow);
 #else // PARALLEL
 		// TODO
+		memcpy(localPartElemBoundary[i*4], boundaries[localPartIds[i]*4 ], sizeof(unsigned int)*4);
 #endif // PARALLEL
 
 		for (int j = 0; j < 4; j++) {
@@ -763,19 +771,9 @@ int main(int argc, char* argv[])
 			if (localPartElemNb[i*4 + j] < 0) {
 				localPartElemNb[i*4 + j] = localPartPtr[curPart+1]-localPartPtr[curPart];
 
-				// Set boundary (if neighbor partition == -1)
-				if (localPartElemRanks[i*4 + j] < 0) {
+				// Set rank on real boundaries
+				if (localPartElemRanks[i*4 + j] < 0)
 					localPartElemRanks[i*4 + j] = curPart+(rank*nMaxLocalPart);
-#ifdef PARALLEL
-					MPI_Win_lock(MPI_LOCK_SHARED, localPartElements[i].id / nMaxLocalElements, MPI_MODE_NOCHECK, boundaryWindow);
-					MPI_Get(&localPartElemBoundary[i*4 + j], 1, MPI_UNSIGNED,
-							localPartElements[i].id / nMaxLocalElements, (localPartElements[i].id % nMaxLocalElements)*4 + j, 1, MPI_UNSIGNED,
-							boundaryWindow);
-					MPI_Win_unlock(localPartElements[i].id / nMaxLocalElements, boundaryWindow);
-#else // PARALLEL
-					localPartElemBoundary[i*4 + j] = boundaries[localPartIds[i]*4 + j];
-#endif // PARALLEL
-				}
 			}
 		}
 	}
