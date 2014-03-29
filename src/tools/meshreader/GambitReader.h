@@ -280,6 +280,7 @@ public:
 				m_boundaries[i].lineSize = 0; // Variable line size
 				m_boundaries[i].elementSize = 0;
 
+				m_mesh.clear(); // The fixed boundary try may seek beyond the end of the file
 				m_mesh.seekg(m_boundaries[i].seekPosition);
 
 				for (size_t j = 0; j < m_boundaries[i].nLines; j++)
