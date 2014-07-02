@@ -66,9 +66,9 @@ vars.AddVariables(
                 None,
                 PathVariable.PathAccept ),
                 
-  BoolVariable( 'useExecutionEnvironment',
+  BoolVariable( 'useEnv',
                 'set variables set in the execution environment',
-                False )
+                True )
 )
 
 # generate help text
@@ -94,7 +94,7 @@ if unknownVariables:
 env = Environment(variables=vars)
 
 # Set environment
-if env['useExecutionEnvironment']:
+if env['useEnv']:
   env['ENV'] = os.environ
 
 #
@@ -114,7 +114,7 @@ if 'cxx' in env:
   env['CXX'] = env['cxx']
 else:
   if env['parallelization'] in ['mpi']:
-    env['CXX'] = 'mpiCC'
+    env['CXX'] = 'mpicxx'
   else:
     env['CXX'] = 'g++'
 
@@ -177,7 +177,10 @@ Import('env')
 env.StaticLibrary('#/'+env['libFile'], env.sourceFiles)
 
 # build unit tests
-if env['unitTests'] != 'none':
+if env['unitTests']:
+  # Anything done here should only affect tests
+  env = env.Clone()
+  
   # define location of cxxtest
   env['CXXTEST'] = 'submodules/cxxtest'
  
