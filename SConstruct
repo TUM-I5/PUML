@@ -66,9 +66,9 @@ vars.AddVariables(
                 None,
                 PathVariable.PathAccept ),
                 
-  BoolVariable( 'useExecutionEnvironment',
+  BoolVariable( 'useEnv',
                 'set variables set in the execution environment',
-                False )
+                True )
 )
 
 # generate help text
@@ -94,7 +94,7 @@ if unknownVariables:
 env = Environment(variables=vars)
 
 # Set environment
-if env['useExecutionEnvironment']:
+if env['useEnv']:
   env['ENV'] = os.environ
 
 #
@@ -171,8 +171,9 @@ env['buildDir'] = env['buildDir']+'/build_'+lib_name
 # setup additional dependencies for tools
 env.tools = env.Clone()
 env.tools.Append(CPPPATH=['#/submodules'])
-env.tools.Append(LIBS=[os.path.split(env['libFile'])[1]])
-env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
+# TODO does not work (at the moment it is not required)
+#env.tools.Append(LIBS=[os.path.split(env['libFile'])[1]])
+#env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
 env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
 # ParMETIS
