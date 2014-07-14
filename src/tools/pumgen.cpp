@@ -164,9 +164,6 @@ int main(int argc, char* argv[])
 	MPI_Comm_size(MPI_COMM_WORLD, &processes);
 #endif // PARALLEL
 
-	// TODO only tetrahedral meshes are currently supported
-	unsigned int* elements;
-
 	// Parse command line arguments
 	utils::Args args;
 	args.addAdditionalOption("input", "Input mesh file");
@@ -207,6 +204,8 @@ int main(int argc, char* argv[])
 	mesh.open(inputFile.c_str());
 
 	// Read elements
+	// TODO only tetrahedral meshes are currently supported
+	unsigned int* elements;
 #ifdef PARALLEL
 	MPI_Alloc_mem(mesh.nLocalElements()*4*sizeof(unsigned int), MPI_INFO_NULL, &elements);
 #else // PARALLEL

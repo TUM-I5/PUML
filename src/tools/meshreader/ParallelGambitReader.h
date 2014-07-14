@@ -282,6 +282,8 @@ public:
 
 				for (unsigned int i = 0; i < size; i += 2)
 					groups[buf[i]] = buf[i+1];
+
+				recieved += size;
 			}
 
 			delete [] buf;
