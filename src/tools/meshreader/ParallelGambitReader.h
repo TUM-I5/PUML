@@ -70,12 +70,12 @@ public:
 		m_nBoundaries = vars[2];
 	}
 
-	unsigned int nVertices()
+	unsigned int nVertices() const
 	{
 		return m_nVertices;
 	}
 
-	unsigned int nElements()
+	unsigned int nElements() const
 	{
 		return m_nElements;
 	}
@@ -83,7 +83,7 @@ public:
 	/**
 	 * @return Number of boundary faces
 	 */
-	unsigned int nBoundaries()
+	unsigned int nBoundaries() const
 	{
 		return m_nBoundaries;
 	}
@@ -101,8 +101,7 @@ public:
 	{
 		unsigned int chunkSize = (m_nVertices + m_nProcs - 1) / m_nProcs;
 
-		switch (m_rank) {
-		case 0:
+		if (m_rank == 0) {
 			// Allocate second buffer so we can read and send in parallel
 			double* vertices2 = new double[chunkSize * 3];
 			if (m_nProcs % 2 == 0)
@@ -132,13 +131,11 @@ public:
 			waitIfRequest(request);
 
 			delete [] vertices2;
-			break;
-		case (m_nProcs-1):
-			chunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
-			/* no break */
-		default:
+		} else {
+			if (m_rank == m_nProcs-1)
+				chunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
+
 			MPI_Recv(vertices, chunkSize*4, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
-			break;
 		}
 	}
 
@@ -156,8 +153,7 @@ public:
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
-		switch (m_rank) {
-		case 0:
+		if (m_rank == 0) {
 			// Allocate second buffer so we can read and send in parallel
 			unsigned int* elements2 = new unsigned int[chunkSize * 4];
 			if (m_nProcs % 2 == 0)
@@ -188,11 +184,10 @@ public:
 			waitIfRequest(request);
 
 			delete [] elements2;
-			break;
-		case (m_nProcs-1):
-			chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
-			/* no break */
-		default:
+		} else {
+			if (m_rank == m_nProcs-1)
+				chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
+
 			MPI_Recv(elements, chunkSize*4, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
 		}
 	}
@@ -209,8 +204,7 @@ public:
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
-		switch (m_rank) {
-		case 0:
+		if (m_rank == 0) {
 			unsigned int maxChunkSize = chunkSize;
 			ElementGroup* map = new ElementGroup[maxChunkSize];
 
@@ -268,11 +262,10 @@ public:
 			delete [] aggregator;
 			delete [] sizes;
 			delete [] requests;
-			break;
-		case (m_nProcs-1):
-			chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
-			/* no break */
-		default:
+		} else {
+			if (m_rank == m_nProcs-1)
+				chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
+
 			// Allocate enough memory
 			unsigned int* buf = new unsigned int[chunkSize*2];
 
@@ -304,8 +297,7 @@ public:
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
-		switch (m_rank) {
-		case 0:
+		if (m_rank == 0) {
 			unsigned int maxChunkSize = chunkSize;
 			BoundaryFace* faces = new BoundaryFace[maxChunkSize];
 
@@ -371,11 +363,10 @@ public:
 
 			delete [] sizes;
 			delete [] requests;
-			break;
-		case (m_nProcs-1):
-			chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
-			/* no break */
-		default:
+		} else {
+			if (m_rank == m_nProcs-1)
+				chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
+
 			// Allocate enough memory
 			unsigned int* buf = new unsigned int[chunkSize*2];
 

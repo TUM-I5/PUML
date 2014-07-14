@@ -248,7 +248,7 @@ int main(int argc, char* argv[])
 	delete [] eind;
 
 	logInfo(rank) << "Creating neighborhood information";
-	int* elementNeighbors = new unsigned int[mesh.nLocalElements()*4];
+	int* elementNeighbors = new int[mesh.nLocalElements()*4];
 	for (unsigned int i = 0; i < mesh.nLocalElements(); i++) {
 		idx_t j;
 		for (j = 0; j < xadj[i+1]-xadj[i]; j++)
@@ -401,7 +401,7 @@ int main(int argc, char* argv[])
 	Element* recvElements = new Element[recvSum];
 
 	// Create the MPI datatype
-	int blockLength[] = {1, 4, 1, 4, 4, 1};
+	int blockLength[] = {1, 4, 1, 4, 4};
 	MPI_Aint displacement[] = {0, reinterpret_cast<uintptr_t>(recvElements[0].vertex)
 			- reinterpret_cast<uintptr_t>(&recvElements[0]),
 			reinterpret_cast<uintptr_t>(&recvElements[0].group)
@@ -409,12 +409,11 @@ int main(int argc, char* argv[])
 			reinterpret_cast<uintptr_t>(recvElements[0].boundaries)
 			- reinterpret_cast<uintptr_t>(&recvElements[0]),
 			reinterpret_cast<intptr_t>(recvElements[0].neighbors)
-			- reinterpret_cast<intptr_t>(&recvElements[0]),
-			sizeof(Element)};
+			- reinterpret_cast<intptr_t>(&recvElements[0])};
 	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UNSIGNED,
-			MPI_UNSIGNED, MPI_INT, MPI_UB};
+			MPI_UNSIGNED, MPI_INT};
 	MPI_Datatype elementType;
-	MPI_Type_create_struct(6, blockLength, displacement, type, &elementType);
+	MPI_Type_create_struct(5, blockLength, displacement, type, &elementType);
 	MPI_Type_commit(&elementType);
 
 	MPI_Alltoallv(sendElements, sendcounts, senddispls, elementType,
@@ -531,7 +530,6 @@ int main(int argc, char* argv[])
 		if (i >= localPartPtr[curPart+1])
 			curPart++;
 
-#ifdef PARALLEL
 		// Set boundary (do this for all boundaries, because of inner boundary conditions)
 		memcpy(&localPartElemBoundary[i*4], localPartElements[i].boundaries, 4*sizeof(unsigned int));
 
@@ -583,7 +581,8 @@ int main(int argc, char* argv[])
 				localPartElemNb[i*4 + face] = globalElem2PartId.at(localPartElements[i].neighbors[j]);
 			else {
 				// Mark id as neighbor
-				MPINeighborElement neighborElement = {i-localPartPtr[curPart], face, localPartElements[i].neighbors[j], face2};
+				MPINeighborElement neighborElement = {static_cast<int>(i-localPartPtr[curPart]),
+						face, localPartElements[i].neighbors[j], face2};
 				boundaryMaps[curPart][neighborPart].push_back(neighborElement);
 			}
 
@@ -800,7 +799,7 @@ int main(int argc, char* argv[])
 		size_t start[3] = {j + rank*nMaxLocalPart, 0, 0};
 		int size = localPartPtr[j+1]-localPartPtr[j];
 		checkNcError(nc_put_var1_int(ncFile, ncVarElemSize, start, &size));
-		size_t count[3] = {1, size, 4};
+		size_t count[3] = {1, static_cast<size_t>(size), 4};
 		checkNcError(nc_put_vara_uint(ncFile, ncVarElemVertices, start, count, &localPartElemVrtx[localPartPtr[j]*4]));
 		checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighbors, start, count, &localPartElemNb[localPartPtr[j]*4]));
 		checkNcError(nc_put_vara_uint(ncFile, ncVarElemBoundaries, start, count, &localPartElemBoundary[localPartPtr[j]*4]));
@@ -824,7 +823,6 @@ int main(int argc, char* argv[])
 #ifdef PARALLEL
 	MPI_Win_free(&elementWindow);
 	MPI_Win_free(&elementPartWindow);
-	MPI_Win_free(&elementNbWindow);
 	MPI_Free_mem(elements);
 	MPI_Free_mem(elementPart);
 #else // PARALLEL
@@ -943,7 +941,7 @@ int main(int argc, char* argv[])
 				localBoundaryIds[k] = j->second[k].localElement;
 			}
 
-			size_t count[3] = {1, 1, size};
+			size_t count[3] = {1, 1, static_cast<size_t>(size)};
 			checkNcError(nc_put_vara_uint(ncFile, ncVarBndElemLocalIds, start, count, localBoundaryIds));
 
 			boundariesDone++;
@@ -963,7 +961,7 @@ int main(int argc, char* argv[])
 		int remoteRank = boundaryMaps[0].begin()->first;
 		checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
 
-		size_t count[3] = {1, 1, size};
+		size_t count[3] = {1, 1, static_cast<size_t>(size)};
 		checkNcError(nc_put_vara_uint(ncFile, ncVarBndElemLocalIds, start, count, localBoundaryIds));
 	}
 

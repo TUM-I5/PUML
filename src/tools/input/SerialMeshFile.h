@@ -76,7 +76,7 @@ public:
 	{
 		m_meshReader.open(meshFile);
 
-		m_nMaxLocalVertices = (nVertices + m_nProcs - 1) / m_nProcs;
+		m_nMaxLocalVertices = (nVertices() + m_nProcs - 1) / m_nProcs;
 		m_nMaxLocalElements = (nElements() + m_nProcs - 1) / m_nProcs;
 		if (m_rank == m_nProcs - 1) {
 			m_nLocalVertices = nVertices() - (m_nProcs-1) * m_nMaxLocalVertices;
