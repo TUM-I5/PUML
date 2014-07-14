@@ -136,6 +136,8 @@ const static int face2orientation[4][4] = {
 		//{1, 2, 3}
 };
 
+const static int METIS_RANDOM_SEED = 42;
+
 int main(int argc, char* argv[])
 {
 	int rank = 0;
@@ -360,14 +362,14 @@ int main(int argc, char* argv[])
 		tpwgts[i] = 1./nPartitions;
 
 	real_t ubev = 1.01;
-	idx_t options = 0;
+	idx_t options[3] = {1, 0, METIS_RANDOM_SEED};
 
 	idx_t edgecut;
 	idx_t* part = new idx_t[nLocalElements];
 
 #ifdef PARALLEL
 	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, 0L, 0L, &wgtflag, &numflag, &ncon,
-			&nparts, tpwgts, &ubev, &options, &edgecut, part, &commWorld) != METIS_OK)
+			&nparts, tpwgts, &ubev, options, &edgecut, part, &commWorld) != METIS_OK)
 #else // PARALLEL
 	// TODO
 #endif // PARALLEL
