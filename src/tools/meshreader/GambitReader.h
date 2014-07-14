@@ -294,12 +294,12 @@ public:
 		}
 	}
 
-	unsigned int nVertices()
+	unsigned int nVertices() const
 	{
 		return m_vertices.nLines;
 	}
 
-	unsigned int nElements()
+	unsigned int nElements() const
 	{
 		return m_elements.nLines;
 	}
@@ -307,7 +307,7 @@ public:
 	/**
 	 * @return Number of boundary faces
 	 */
-	unsigned int nBoundaries()
+	unsigned int nBoundaries() const
 	{
 		unsigned int count = 0;
 		for (std::vector<BoundarySection>::const_iterator i = m_boundaries.begin();
@@ -350,6 +350,18 @@ public:
 	}
 
 	/**
+	 * Read all vertices
+	 *
+	 * @see readVertices(unsigned int, unsigned int, double*)
+	 */
+	void readVertices(double* vertices)
+	{
+		logInfo() << "Reading vertices";
+
+		readVertices(0, nVertices(), vertices);
+	}
+
+	/**
 	 * Reads elements from start to start+count from the file and stores them in elements
 	 *
 	 * @param elements Buffer to store vertices of each element. The caller is responsible
@@ -382,12 +394,23 @@ public:
 	}
 
 	/**
+	 * Reads all elements
+	 *
+	 * @see readElements(unsigned int, unsigned int, unsinged int*)
+	 */
+	void readElements(unsigned int* elements)
+	{
+		logInfo() << "Reading elements";
+		readElements(0, nElements(), elements);
+	}
+
+	/**
 	 * Reads group number for elements from start to start+count
 	 *
-	 * @param group Buffer for storing the group numbers. The caller is responsible
+	 * @param groups Buffer for storing the group numbers. The caller is responsible
 	 *  for allocating the buffer.
 	 */
-	void readGroups(unsigned int start, unsigned int count, ElementGroup* group)
+	void readGroups(unsigned int start, unsigned int count, ElementGroup* groups)
 	{
 		m_mesh.clear();
 
@@ -406,9 +429,9 @@ public:
 			m_mesh.read(buf, section->elementSize);
 
 			std::istringstream ss(std::string(buf, section->elementSize));
-			ss >> group[i].element;
-			group[i].element--;
-			group[i].group = section->group;
+			ss >> groups[i].element;
+			groups[i].element--;
+			groups[i].group = section->group;
 
 			start++;
 			// May need to jump from one section to the next
@@ -424,6 +447,27 @@ public:
 		}
 
 		delete [] buf;
+	}
+
+	/**
+	 * Reads all groups numbers.
+	 * In contrast to readGroups(unsigned int, unsigned int, ElementGroup*) it
+	 * returns the group numbers sorted according to the elements.
+	 */
+	void readGroups(unsigned int* groups)
+	{
+		logInfo() << "Reading group information";
+
+		ElementGroup* map = new ElementGroup[nElements()];
+		readGroups(0, nElements(), map);
+
+#ifdef _OPENMP
+		#pragma omp parallel for schedule(static)
+#endif
+		for (unsigned int i = 0; i < nElements(); i++)
+			groups[map[i].element] = map[i].group;
+
+		delete [] map;
 	}
 
 	/**
@@ -499,6 +543,29 @@ public:
 		}
 
 		delete [] buf;
+	}
+
+	/**
+	 * Reads all boundaries.
+	 *
+	 * @param Boundary condition for all faces. The caller is responsible
+	 *  for allocation the memory (<code>nElements()*4</code>). Only the faces
+	 *  for which boundary conditions are available are modified.
+	 *
+	 * @todo Only tetrahedral meshes are supported
+	 */
+	void readBoundaries(unsigned int* boundaries)
+	{
+		logInfo() << "Reading boundary conditions";
+
+		unsigned int nBnds = nBoundaries();
+		BoundaryFace* faces = new BoundaryFace[nBoundaries()];
+		readBoundaries(0, nBnds, faces);
+
+		for (unsigned int i = 0; i < nBnds; i++)
+			boundaries[faces[i].element*4 + faces[i].face] = faces[i].type;
+
+		delete [] faces;
 	}
 
 private:

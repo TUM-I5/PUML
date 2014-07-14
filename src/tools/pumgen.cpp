@@ -34,7 +34,12 @@
 #endif // PARALLEL
 #include <netcdf.h>
 
+#include "input/SerialMeshFile.h"
+#ifdef PARALLEL
+#include "meshreader/ParallelGambitReader.h"
+#else // PARALLEL
 #include "meshreader/GambitReader.h"
+#endif // PARALLEL
 
 struct Element {
 	/** Global id */
@@ -43,6 +48,10 @@ struct Element {
 	unsigned int vertex[4];
 	/** The group number */
 	unsigned int group;
+	/** The boundary conditions */
+	unsigned int boundaries[4];
+	/** The neighbor ids */
+	int neighbors[4];
 
 	/**
 	 * Compare elements by the global id
@@ -155,161 +164,69 @@ int main(int argc, char* argv[])
 	MPI_Comm_size(MPI_COMM_WORLD, &processes);
 #endif // PARALLEL
 
-	GambitReader gambitReader;
-	unsigned int nPartitions;
-	std::string outputFile;
-
-	unsigned int nVertices;
-	unsigned int nElements;
-
-	unsigned int nLocalElements;	// The number of elements on this rank
-	unsigned int nMaxLocalElements;	// The number of elements on all ranks except the last
-
 	// TODO only tetrahedral meshes are currently supported
 	unsigned int* elements;
 
-	if (rank == 0) {
-		std::string inputFile;
+	// Parse command line arguments
+	utils::Args args;
+	args.addAdditionalOption("input", "Input mesh file");
+	args.addAdditionalOption("partition", "Number of partitions");
+	args.addAdditionalOption("output", "Output parallel unstructured mesh file", false);
 
-		utils::Args args;
-		args.addAdditionalOption("input", "Input mesh file");
-		args.addAdditionalOption("partition", "Number of partitions");
-		args.addAdditionalOption("output", "Output parallel unstructured mesh file", false);
+	if (args.parse(argc, argv) != utils::Args::Success)
+		return 1;
 
-		if (args.parse(argc, argv) == utils::Args::Success) {
-			inputFile = args.getAdditionalArgument<std::string>("input");
-			nPartitions = args.getAdditionalArgument<unsigned int>("partition");
+	std::string inputFile = args.getAdditionalArgument<std::string>("input");
 
-			if (args.isSetAdditional("output")) {
-				outputFile = args.getAdditionalArgument<std::string>("output");
-			} else {
-				// Compute default output filename
-				outputFile = inputFile;
-				size_t dotPos = outputFile.find_last_of('.');
-				if (dotPos != std::string::npos)
-					outputFile.erase(dotPos);
-				outputFile.append(".nc.pum");
-			}
+	unsigned int nPartitions = args.getAdditionalArgument<unsigned int>("partition");
+	if (nPartitions == 0)
+		logError() << "Partitions created must be greater than zero";
 
-			if (nPartitions == 0)
-				logError() << "Partitions created must be greater than zero";
+	if (nPartitions <= ((nPartitions + processes - 1) / processes) * (processes-1))
+		logError() << "Not every process will get at least one partition, use a smaller number of ranks";
 
-			if (nPartitions <= ((nPartitions + processes - 1) / processes) * (processes-1))
-				logError() << "Not every process will get at least one partition, use a smaller number of ranks";
-
-#ifdef PARALLEL
-			int constants[] = {nPartitions, static_cast<int>(outputFile.size())};
-			MPI_Bcast(constants, 2, MPI_INT, 0, MPI_COMM_WORLD);
-
-			char* buf = new char[outputFile.size()];
-			outputFile.copy(buf, outputFile.size());
-			MPI_Bcast(buf, outputFile.size(), MPI_CHAR, 0, MPI_COMM_WORLD);
-			delete [] buf;
-#endif // PARALLEL
-		} else {
-#ifdef PARALLEL
-			// Tell all processes to quit
-			int constants[] = {0, 0};
-			MPI_Bcast(constants, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-			MPI_Finalize();
-#endif // PARALLEL
-			return 1;
-		}
-
-		// Rank 0 does all the reading and distributes the contents
-		gambitReader.open(inputFile.c_str());
-
-		nVertices = gambitReader.nVertices();
-		nElements = gambitReader.nElements();
-
-#ifdef PARALLEL
-		// Distribute the mesh size
-		unsigned int meshSize[] = {nVertices, nElements};
-		MPI_Bcast(meshSize, 2, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
-#endif // PARALLEL
-
-		nMaxLocalElements = (nElements + processes - 1) / processes;
-		nLocalElements = nMaxLocalElements;
-
-		// Allocate memory for the elements
-#ifdef PARALLEL
-		MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements*4, MPI_INFO_NULL, &elements);
-#else // PARALLEL
-		elements = new unsigned int[nLocalElements * 4];
-#endif // PARALLEL
-
-#ifdef PARALLEL
-		// Read chunks of elements and distribute them to each processor
-		for (int i = 1; i < processes-1; i++) {
-			logInfo() << "Reading elements part" << i << "of" << processes;
-			gambitReader.readElements(i * nLocalElements, nLocalElements, elements);
-			MPI_Send(elements, nLocalElements*4, MPI_UNSIGNED, i, 0, MPI_COMM_WORLD);
-		}
-
-		// Last process
-		if (processes > 1) {
-			logInfo() << "Reading elements part" << (processes-1) << "of" << processes;
-			gambitReader.readElements((processes-1) * nLocalElements, nElements - (processes-1) * nLocalElements, elements);
-			MPI_Send(elements, (nElements - (processes-1) * nLocalElements) * 4, MPI_UNSIGNED, processes - 1, 0, MPI_COMM_WORLD);
-		}
-#endif // PARALLEL
-
-		// Finally our own elements
-		logInfo() << "Reading elements part" << processes << "of" << processes;
-		gambitReader.readElements(0, nLocalElements, elements);
+	std::string outputFile;
+	if (args.isSetAdditional("output")) {
+		outputFile = args.getAdditionalArgument<std::string>("output");
 	} else {
-#ifdef PARALLEL
-		// All ranks except 0
-		int constants[2];
-		MPI_Bcast(constants, 2, MPI_INT, 0, MPI_COMM_WORLD);
-
-		if (constants[0] == 0) {
-			// Wrong command line parameters
-			MPI_Finalize();
-			return 1;
-		}
-
-		nPartitions = constants[0];
-
-		char* buf = new char[constants[1]];
-		MPI_Bcast(buf, constants[1], MPI_CHAR, 0, MPI_COMM_WORLD);
-		outputFile.append(buf, constants[1]);
-		delete [] buf;
-
-		// Size of the mesh
-		unsigned int meshSize[2];
-		MPI_Bcast(meshSize, 2, MPI_UNSIGNED, 0, MPI_COMM_WORLD);
-		nVertices = meshSize[0];
-		nElements = meshSize[1];
-
-		nMaxLocalElements = (nElements + processes - 1) / processes;
-		if (rank == processes - 1)
-			nLocalElements = nElements - (processes-1) * nMaxLocalElements;
-		else
-			nLocalElements = nMaxLocalElements;
-
-		MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements*4, MPI_INFO_NULL, &elements);
-
-		// Get our part from rank 0
-		MPI_Recv(elements, nLocalElements*4, MPI_UNSIGNED, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-#endif // PARALLEL
+		// Compute default output filename
+		outputFile = inputFile;
+		size_t dotPos = outputFile.find_last_of('.');
+		if (dotPos != std::string::npos)
+			outputFile.erase(dotPos);
+		outputFile.append(".nc.pum");
 	}
 
-	// TODO wrap this code part so we can switch to different libraries
+	// Open Gambit mesh
+#ifdef PARALLEL
+	SerialMeshFile<ParallelGambitReader> mesh;
+#else // PARALLEL
+	SerialMeshFile<GambitReader> mesh;
+#endif // PARALLEL
 
+	mesh.open(inputFile.c_str());
+
+	// Read elements
+#ifdef PARALLEL
+	MPI_Alloc_mem(mesh.nLocalElements()*4*sizeof(unsigned int), MPI_INFO_NULL, &elements);
+#else // PARALLEL
+	elements = new unsigned int[mesh.nLocalElements()*4];
+#endif // PARALLEL
+	mesh.getElements(elements);
+
+	// TODO wrap this code part so we can switch to different libraries
 	logInfo(rank) << "Creating dual graph with METIS";
 	idx_t* elemDist = new idx_t[processes+1];
 	for (int i = 0; i < processes; i++)
-		elemDist[i] = i * nMaxLocalElements;
-	elemDist[processes] = nElements;
+		elemDist[i] = mesh.elemStart(i);
+	elemDist[processes] = mesh.nElements();
 
-	idx_t* eptr = new idx_t[nLocalElements+1];
-	for (unsigned int i = 0; i < nLocalElements+1; i++)
+	idx_t* eptr = new idx_t[mesh.nLocalElements()+1];
+	for (unsigned int i = 0; i < mesh.nLocalElements()+1; i++)
 		eptr[i] = i * 4;
 
-	idx_t* eind = new idx_t[nLocalElements*4];
-	for (unsigned int i = 0; i < nLocalElements*4; i++)
+	idx_t* eind = new idx_t[mesh.nLocalElements()*4];
+	for (unsigned int i = 0; i < mesh.nLocalElements()*4; i++)
 		eind[i] = elements[i];
 
 	idx_t numflag = 0;
@@ -331,13 +248,8 @@ int main(int argc, char* argv[])
 	delete [] eind;
 
 	logInfo(rank) << "Creating neighborhood information";
-	int* elementNeighbors;
-#ifdef PARALLEL
-	MPI_Alloc_mem(sizeof(unsigned int)*4*nLocalElements, MPI_INFO_NULL, &elementNeighbors);
-#else // PARALLEL
-	elementNeighbors = new unsigned int[4*nLocalElements];
-#endif // PARALLEL))
-	for (unsigned int i = 0; i < nLocalElements; i++) {
+	int* elementNeighbors = new unsigned int[mesh.nLocalElements()*4];
+	for (unsigned int i = 0; i < mesh.nLocalElements(); i++) {
 		idx_t j;
 		for (j = 0; j < xadj[i+1]-xadj[i]; j++)
 			elementNeighbors[i*4 + j] = adjncy[xadj[i] + j];
@@ -346,11 +258,11 @@ int main(int argc, char* argv[])
 			elementNeighbors[i*4 + j] = -1;
 
 	}
-#ifdef PARALLEL
-	MPI_Win elementNbWindow;
-	MPI_Win_create(elementNeighbors, sizeof(unsigned int)*nLocalElements*4,
-			sizeof(int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementNbWindow);
-#endif // PARALLEL
+
+	// Read boundary information from the mesh
+	unsigned int* boundaries = new unsigned int[mesh.nLocalElements()*4];
+	memset(boundaries, 0, mesh.nLocalElements()*4*sizeof(unsigned int));
+	mesh.getBoundaries(boundaries);
 
 	logInfo(rank) << "Creating partitions with METIS";
 	idx_t wgtflag = 0;
@@ -365,7 +277,7 @@ int main(int argc, char* argv[])
 	idx_t options[3] = {1, 0, METIS_RANDOM_SEED};
 
 	idx_t edgecut;
-	idx_t* part = new idx_t[nLocalElements];
+	idx_t* part = new idx_t[mesh.nLocalElements()];
 
 #ifdef PARALLEL
 	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, 0L, 0L, &wgtflag, &numflag, &ncon,
@@ -393,48 +305,9 @@ int main(int argc, char* argv[])
 	METIS_Free(xadj);
 	METIS_Free(adjncy);
 
-	// Read and distribute group information
-	unsigned int* elementGroups;
-#ifdef PARALLEL
-	MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements, MPI_INFO_NULL, &elementGroups);
-
-	MPI_Win groupWindow;
-	MPI_Win_create(elementGroups, sizeof(unsigned int)*nLocalElements, sizeof(unsigned int),
-			MPI_INFO_NULL, MPI_COMM_WORLD, &groupWindow);
-#else // PARALLEL
-	elementGroups = new unsigned int[nLocalElements];
-#endif // PARALLEL
-
-
-	if (rank == 0) {
-#ifdef PARALLEL
-		ElementGroup* groups = new ElementGroup[nLocalElements];
-
-		// Read the group and put the on the other processes
-		for (int i = 0; i < processes; i++) {
-			unsigned int count = nLocalElements;
-			if (i == processes-1)
-				count = nElements - (processes-1) * nLocalElements;
-
-			logInfo() << "Reading group information part" << (i+1) << "of" << processes;
-			gambitReader.readGroups(i * nLocalElements, count, groups);
-			for (unsigned int j = 0; j < count; j++) {
-				MPI_Win_lock(MPI_LOCK_EXCLUSIVE, groups[j].element / nLocalElements, MPI_MODE_NOCHECK, groupWindow);
-				MPI_Put(&groups[j].group, 1, MPI_UNSIGNED, groups[j].element / nLocalElements, groups[j].element % nLocalElements,
-						1, MPI_UNSIGNED, groupWindow);
-				MPI_Win_unlock(groups[j].element / nLocalElements, groupWindow);
-			}
-		}
-
-		delete [] groups;
-#else // PARALLEL
-		// TODO
-#endif // PARALLEL
-	}
-
-#ifdef PARALLEL
-	MPI_Win_free(&groupWindow);
-#endif // PARALLEL
+	// Read group information
+	unsigned int* elementGroups = new unsigned int[mesh.nLocalElements()];
+	mesh.getGroups(elementGroups);
 
 	logInfo(rank) << "Redistributing elements";
 	unsigned int nMaxLocalPart = (nPartitions + processes - 1) / processes;
@@ -455,7 +328,7 @@ int main(int argc, char* argv[])
 
 #ifdef PARALLEL
 	std::vector<unsigned int>* elementPerPart = new std::vector<unsigned int>[nPartitions];
-	for (unsigned int i = 0; i < nLocalElements; i++)
+	for (unsigned int i = 0; i < mesh.nLocalElements(); i++)
 		elementPerPart[part[i]].push_back(i);
 	unsigned int* nElementPerPart = new unsigned int[nPartitions];
 	for (unsigned int i = 0; i < nPartitions; i++)
@@ -482,18 +355,27 @@ int main(int argc, char* argv[])
 	MPI_Alltoallv(nElementPerPart, sendcounts, senddispls, MPI_UNSIGNED,
 			recvSize, recvcounts, recvdispls, MPI_UNSIGNED, MPI_COMM_WORLD);
 
-	// Now send the ids+vertices of the elements to all processes
-	Element* sendElements = new Element[nLocalElements];
+	// Now send the the element to all processes
+	Element* sendElements = new Element[mesh.nLocalElements()];
 	pos = 0;
 	for (unsigned int i = 0; i < nPartitions; i++) {
 		for (unsigned int j = 0; j < nElementPerPart[i]; j++) {
 			// Set global id
-			sendElements[pos].id = elementPerPart[i][j] + nMaxLocalElements * rank;
-			memcpy(sendElements[pos].vertex, &elements[elementPerPart[i][j]*4], sizeof(unsigned int)*4);
+			sendElements[pos].id = elementPerPart[i][j] + mesh.elemStart(rank);
+			memcpy(sendElements[pos].vertex,
+					&elements[elementPerPart[i][j]*4], 4*sizeof(unsigned int));
 			sendElements[pos].group = elementGroups[elementPerPart[i][j]];
+			memcpy(sendElements[pos].boundaries,
+					&boundaries[elementPerPart[i][j]*4], 4*sizeof(unsigned int));
+			memcpy(sendElements[pos].neighbors,
+					&elementNeighbors[elementPerPart[i][j]*4], 4*sizeof(int));
 			pos++;
 		}
 	}
+
+	delete [] elementGroups;
+	delete [] boundaries;
+	delete [] elementNeighbors;
 
 	memset(sendcounts, 0, sizeof(int) * processes);
 	for (unsigned int i = 0; i < nPartitions; i++) {
@@ -519,14 +401,20 @@ int main(int argc, char* argv[])
 	Element* recvElements = new Element[recvSum];
 
 	// Create the MPI datatype
-	int blockLength[] = {1, 4, 1, 1};
+	int blockLength[] = {1, 4, 1, 4, 4, 1};
 	MPI_Aint displacement[] = {0, reinterpret_cast<uintptr_t>(recvElements[0].vertex)
 			- reinterpret_cast<uintptr_t>(&recvElements[0]),
 			reinterpret_cast<uintptr_t>(&recvElements[0].group)
-			- reinterpret_cast<uintptr_t>(&recvElements[0]), sizeof(Element)};
-	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UNSIGNED, MPI_UB};
+			- reinterpret_cast<uintptr_t>(&recvElements[0]),
+			reinterpret_cast<uintptr_t>(recvElements[0].boundaries)
+			- reinterpret_cast<uintptr_t>(&recvElements[0]),
+			reinterpret_cast<intptr_t>(recvElements[0].neighbors)
+			- reinterpret_cast<intptr_t>(&recvElements[0]),
+			sizeof(Element)};
+	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UNSIGNED,
+			MPI_UNSIGNED, MPI_INT, MPI_UB};
 	MPI_Datatype elementType;
-	MPI_Type_create_struct(4, blockLength, displacement, type, &elementType);
+	MPI_Type_create_struct(6, blockLength, displacement, type, &elementType);
 	MPI_Type_commit(&elementType);
 
 	MPI_Alltoallv(sendElements, sendcounts, senddispls, elementType,
@@ -542,11 +430,6 @@ int main(int argc, char* argv[])
 
 	delete [] nElementPerPart;
 	delete [] elementPerPart;
-#ifdef PARALLEL
-	MPI_Free_mem(elementGroups);
-#else // PARALLEL
-	delete [] elementGroups;
-#endif // PARALLEL
 
 	// Compute the size of each local partition
 	unsigned int* partSize = new unsigned int[nLocalPart];
@@ -592,11 +475,11 @@ int main(int argc, char* argv[])
 	// But copy it to an unsigned int
 	unsigned int* elementPart;
 #ifdef PARALLEL
-	MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements, MPI_INFO_NULL, &elementPart);
+	MPI_Alloc_mem(mesh.nLocalElements()*sizeof(unsigned int), MPI_INFO_NULL, &elementPart);
 #else // PARALLEL
-	elementPart = new unsigned int[nLocalElements];
+	elementPart = new unsigned int[mesh.nLocalElements()];
 #endif // PARALLEL
-	for (unsigned int i = 0; i < nLocalElements; i++)
+	for (unsigned int i = 0; i < mesh.nLocalElements(); i++)
 		elementPart[i] = part[i];
 
 	delete [] part;
@@ -606,61 +489,16 @@ int main(int argc, char* argv[])
 		std::sort(&localPartElements[localPartPtr[i]],
 				&localPartElements[localPartPtr[i]]+localPartPtr[i+1]-localPartPtr[i]);
 
-	// Read boundary information from the mesh
-	unsigned int* boundaries;
-#ifdef PARALLEL
-	MPI_Alloc_mem(sizeof(unsigned int)*nLocalElements*4, MPI_INFO_NULL, &boundaries);
-	MPI_Win boundaryWindow;
-	MPI_Win_create(boundaries, sizeof(unsigned int)*nLocalElements*4,
-			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &boundaryWindow);
-#else // PARALLEL
-	boundaries = new unsigned int[nLocalElements*4];
-#endif // PARELLEL
-	memset(boundaries, 0, sizeof(unsigned int)*nLocalElements*4);
-	if (rank == 0) {
-		// Rank 0 does all the reading and distributes the contents
-
-		unsigned int nBoundaries = gambitReader.nBoundaries();
-
-		// Load the boundaries in chunks
-		BoundaryFace* boundaryFaces = new BoundaryFace[nLocalElements];
-
-		for (unsigned int i = 0; i < (nBoundaries + nLocalElements - 1) / nLocalElements; i++) {
-			logInfo() << "Reading boundary part" << (i+1)
-					<< "of" << ((nBoundaries + nLocalElements - 1) / nLocalElements);
-			unsigned int n = std::min(nLocalElements, nBoundaries - i*nLocalElements);
-			gambitReader.readBoundaries(i * nLocalElements, n, boundaryFaces);
-
-			// Store the boundary information in the correct rank
-			for (unsigned int j = 0; j < n; j++) {
-				boundaryFaces[j].type -= 100; // TODO do not do this here
-
-#ifdef PARALLEL
-				MPI_Win_lock(MPI_LOCK_EXCLUSIVE, boundaryFaces[j].element / nMaxLocalElements,
-						MPI_MODE_NOCHECK, boundaryWindow);
-				MPI_Put(&boundaryFaces[j].type, 1, MPI_UNSIGNED, boundaryFaces[j].element / nMaxLocalElements,
-						(boundaryFaces[j].element % nMaxLocalElements)*4 + boundaryFaces[j].face,
-						1, MPI_UNSIGNED, boundaryWindow);
-				MPI_Win_unlock(boundaryFaces[j].element / nMaxLocalElements, boundaryWindow);
-#else // PARALLEL
-				boundaries[(boundaryFaces[j].element % nMaxLocalElements)*4 + boundaryFaces[j].face] = boundaryFaces[j].type;
-#endif // PARALLEL
-			}
-		}
-
-		delete [] boundaryFaces;
-	}
-
 	logInfo(rank) << "Computing element data";
 #ifdef PARALLEL
 	// Create MPI window to allow access to all elements
 	MPI_Win elementWindow;
-	MPI_Win_create(elements, sizeof(unsigned int)*nLocalElements*4,
+	MPI_Win_create(elements, mesh.nLocalElements()*4*sizeof(unsigned int),
 			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementWindow);
 
 	// Create window for partition information
 	MPI_Win elementPartWindow;
-	MPI_Win_create(elementPart, sizeof(unsigned int)*nLocalElements,
+	MPI_Win_create(elementPart, mesh.nLocalElements()*sizeof(unsigned int),
 			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementPartWindow);
 #endif // PARALLEL
 
@@ -693,48 +531,37 @@ int main(int argc, char* argv[])
 		if (i >= localPartPtr[curPart+1])
 			curPart++;
 
-		int neighbors[4];
 #ifdef PARALLEL
-		MPI_Win_lock(MPI_LOCK_SHARED, localPartElements[i].id / nMaxLocalElements, MPI_MODE_NOCHECK, elementNbWindow);
-		MPI_Get(neighbors, 4, MPI_INT,
-				localPartElements[i].id / nMaxLocalElements, (localPartElements[i].id % nMaxLocalElements)*4, 4, MPI_INT,
-				elementNbWindow);
-		MPI_Win_unlock(localPartElements[i].id / nMaxLocalElements, elementNbWindow);
-
 		// Set boundary (do this for all boundaries, because of inner boundary conditions)
-		MPI_Win_lock(MPI_LOCK_SHARED, localPartElements[i].id / nMaxLocalElements, MPI_MODE_NOCHECK, boundaryWindow);
-		MPI_Get(&localPartElemBoundary[i*4], 4, MPI_UNSIGNED,
-				localPartElements[i].id / nMaxLocalElements, (localPartElements[i].id % nMaxLocalElements)*4, 4, MPI_UNSIGNED,
-				boundaryWindow);
-		MPI_Win_unlock(localPartElements[i].id / nMaxLocalElements, boundaryWindow);
-#else // PARALLEL
-		// TODO
-		memcpy(localPartElemBoundary[i*4], boundaries[localPartIds[i]*4 ], sizeof(unsigned int)*4);
-#endif // PARALLEL
+		memcpy(&localPartElemBoundary[i*4], localPartElements[i].boundaries, 4*sizeof(unsigned int));
 
 		for (int j = 0; j < 4; j++) {
-			if (neighbors[j] < 0)
+			if (localPartElements[i].neighbors[j] < 0)
 				continue;
 
 			// Check whether we are in the same partition
 			unsigned int neighborPart;
 #ifdef PARALLEL
-			MPI_Win_lock(MPI_LOCK_SHARED, neighbors[j] / nMaxLocalElements, MPI_MODE_NOCHECK, elementPartWindow);
+			MPI_Win_lock(MPI_LOCK_SHARED, mesh.rankOfElem(localPartElements[i].neighbors[j]),
+					MPI_MODE_NOCHECK, elementPartWindow);
 			MPI_Get(&neighborPart, 1, MPI_UNSIGNED,
-					neighbors[j] / nMaxLocalElements, neighbors[j] % nMaxLocalElements, 1, MPI_UNSIGNED,
-					elementPartWindow);
-			MPI_Win_unlock(neighbors[j] / nMaxLocalElements, elementPartWindow);
+					mesh.rankOfElem(localPartElements[i].neighbors[j]),
+					mesh.posOfElem(localPartElements[i].neighbors[j]),
+					1, MPI_UNSIGNED, elementPartWindow);
+			MPI_Win_unlock(mesh.rankOfElem(localPartElements[i].neighbors[j]), elementPartWindow);
 #else // PARALLEL
 			// TODO
 #endif // PARALLEL
 
 			unsigned int neighborVertices[4];
 #ifdef PARALLEL
-			MPI_Win_lock(MPI_LOCK_SHARED, neighbors[j] / nMaxLocalElements, MPI_MODE_NOCHECK, elementWindow);
+			MPI_Win_lock(MPI_LOCK_SHARED, mesh.rankOfElem(localPartElements[i].neighbors[j]),
+					MPI_MODE_NOCHECK, elementWindow);
 			MPI_Get(neighborVertices, 4, MPI_UNSIGNED,
-					neighbors[j] / nMaxLocalElements, (neighbors[j] % nMaxLocalElements)*4, 4, MPI_UNSIGNED,
-					elementWindow);
-			MPI_Win_unlock(neighbors[j] / nMaxLocalElements, elementWindow);
+					mesh.rankOfElem(localPartElements[i].neighbors[j]),
+					mesh.posOfElem(localPartElements[i].neighbors[j]) * 4,
+					4, MPI_UNSIGNED, elementWindow);
+			MPI_Win_unlock(mesh.rankOfElem(localPartElements[i].neighbors[j]), elementWindow);
 #else // PARALLEL
 			// TODO
 #endif // PARALLEL
@@ -753,10 +580,10 @@ int main(int argc, char* argv[])
 
 			if (neighborPart == curPart+(rank*nMaxLocalPart))
 				// Set neighbor only if its the same partition
-				localPartElemNb[i*4 + face] = globalElem2PartId.at(neighbors[j]);
+				localPartElemNb[i*4 + face] = globalElem2PartId.at(localPartElements[i].neighbors[j]);
 			else {
 				// Mark id as neighbor
-				MPINeighborElement neighborElement = {i-localPartPtr[curPart], face, neighbors[j], face2};
+				MPINeighborElement neighborElement = {i-localPartPtr[curPart], face, localPartElements[i].neighbors[j], face2};
 				boundaryMaps[curPart][neighborPart].push_back(neighborElement);
 			}
 
@@ -779,13 +606,6 @@ int main(int argc, char* argv[])
 			}
 		}
 	}
-
-#ifdef PARALLEL
-	MPI_Win_free(&boundaryWindow);
-	MPI_Free_mem(boundaries);
-#else // PARALLEL
-	delete [] boundaries;
-#endif // PARALLEL
 
 	logInfo(rank) << "Sorting MPI boundaries";
 	unsigned int* localPartElemMPI = new unsigned int[localPartPtr[nLocalPart]*4];
@@ -1007,61 +827,26 @@ int main(int argc, char* argv[])
 	MPI_Win_free(&elementNbWindow);
 	MPI_Free_mem(elements);
 	MPI_Free_mem(elementPart);
-	MPI_Free_mem(elementNeighbors);
 #else // PARALLEL
 	delete [] elements;
 	delete [] elementPart;
-	delete [] elementNeighbors;
 #endif // PARALLEL
 	delete [] localPartPtr;
 	delete [] localPartElements;
 
-	// Load vertices and distribute them to the other processes
-	unsigned int nMaxLocalVertices = (nVertices + processes - 1) / processes;
-	unsigned int nLocalVertices = nMaxLocalVertices;
-#ifdef PARALLEL
-	if (rank == processes - 1)
-		nLocalVertices = nVertices - nMaxLocalVertices * (processes - 1);
-#endif // PARALLEL
-
+	// Load vertices
 	double* vertices;
 #ifdef PARALLEL
-		MPI_Alloc_mem(sizeof(double)*nLocalVertices*3, MPI_INFO_NULL, &vertices);
+	MPI_Alloc_mem(mesh.nLocalVertices()*3*sizeof(double), MPI_INFO_NULL, &vertices);
 #else // PARALLEL
-		vertices = new double[nLocalVertices * 3];
+	vertices = new double[mesh.nLocalVertices() * 3];
 #endif // PARALLEL
-
-
-	if (rank == 0) {
-#ifdef PARALLEL
-		// Read the vertices and send them to the other processes
-		for (int i = 1; i < processes-1; i++) {
-			logInfo() << "Reading vertices part" << i << "of" << processes;
-			gambitReader.readVertices(i * nLocalVertices, nLocalVertices, vertices);
-			MPI_Send(vertices, nLocalVertices*3, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-		}
-
-		// Last process
-		if (processes > 1) {
-			logInfo() << "Reading vertices part" << (processes-1) << "of" << processes;
-			gambitReader.readVertices((processes-1) * nLocalVertices, nVertices - (processes-1) * nLocalVertices, vertices);
-			MPI_Send(vertices, (nVertices - (processes-1) * nLocalVertices) * 3, MPI_DOUBLE, processes - 1, 0, MPI_COMM_WORLD);
-		}
-#endif // PARALLEL
-
-		// Finally our own vertices
-		logInfo() << "Reading vertices part" << processes << "of" << processes;
-		gambitReader.readVertices(0, nLocalVertices, vertices);
-	} else {
-#ifdef PARALLEL
-		MPI_Recv(vertices, nLocalVertices*3, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-#endif // PARALLEL
-	}
+	mesh.getVertices(vertices);
 
 #ifdef PARALLEL
 	// Create MPI window to get access to all vertices
 	MPI_Win verticesWindow;
-	MPI_Win_create(vertices, sizeof(double)*nLocalVertices,
+	MPI_Win_create(vertices, mesh.nLocalVertices()*3*sizeof(double),
 			sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &verticesWindow);
 #endif // PARALLEL
 
@@ -1082,11 +867,11 @@ int main(int argc, char* argv[])
 
 				// Get the vertices
 #ifdef PARALLEL
-				MPI_Win_lock(MPI_LOCK_SHARED, j->first / nMaxLocalVertices, MPI_MODE_NOCHECK, verticesWindow);
+				MPI_Win_lock(MPI_LOCK_SHARED, mesh.rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
 				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
-						j->first / nMaxLocalVertices, (j->first % nMaxLocalVertices)*3, 3, MPI_DOUBLE,
+						mesh.rankOfVert(j->first), mesh.posOfVert(j->first)*3, 3, MPI_DOUBLE,
 						verticesWindow);
-				MPI_Win_unlock(j->first / nMaxLocalVertices, verticesWindow);
+				MPI_Win_unlock(mesh.rankOfVert(j->first), verticesWindow);
 #else // PARALLEL
 				// TODO
 #endif // PARALLEL
