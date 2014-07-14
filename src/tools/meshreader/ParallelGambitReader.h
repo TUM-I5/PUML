@@ -211,6 +211,10 @@ public:
 			std::vector<unsigned int>* aggregator = new std::vector<unsigned int>[m_nProcs-1];
 			unsigned int* sizes = new unsigned int[m_nProcs-1];
 			MPI_Request* requests = new MPI_Request[(m_nProcs-1)*2];
+			for (int i = 0; i < m_nProcs-1; i++) {
+				requests[i*2] = MPI_REQUEST_NULL;
+				requests[i*2+1] = MPI_REQUEST_NULL;
+			}
 
 			for (int i = 0; i < m_nProcs; i++) {
 				logInfo() << "Reading group information part" << (i+1) << "of" << m_nProcs;
@@ -304,6 +308,10 @@ public:
 			std::vector<unsigned int>* aggregator = new std::vector<unsigned int>[m_nProcs-1];
 			unsigned int* sizes = new unsigned int[m_nProcs-1];
 			MPI_Request* requests = new MPI_Request[(m_nProcs-1)*2];
+			for (int i = 0; i < m_nProcs-1; i++) {
+				requests[i*2] = MPI_REQUEST_NULL;
+				requests[i*2+1] = MPI_REQUEST_NULL;
+			}
 
 			unsigned int nChunks = (m_nBoundaries + chunkSize - 1) / chunkSize;
 			for (unsigned int i = 0; i < nChunks; i++) {
