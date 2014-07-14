@@ -305,11 +305,12 @@ public:
 			unsigned int* sizes = new unsigned int[m_nProcs-1];
 			MPI_Request* requests = new MPI_Request[(m_nProcs-1)*2];
 
-			for (int i = 0; i < m_nProcs; i++) {
-				logInfo() << "Reading boundary conditions part" << (i+1) << "of" << m_nProcs;
+			unsigned int nChunks = (m_nBoundaries + chunkSize - 1) / chunkSize;
+			for (unsigned int i = 0; i < nChunks; i++) {
+				logInfo() << "Reading boundary conditions part" << (i+1) << "of" << nChunks;
 
-				if (i == m_nProcs-1)
-					chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
+				if (i == nChunks-1)
+					chunkSize = m_nBoundaries - (nChunks-1) * chunkSize;
 
 				m_serialReader.readBoundaries(i*maxChunkSize, chunkSize, faces);
 
