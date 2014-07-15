@@ -118,7 +118,7 @@ public:
 	 */
 	int rankOfVert(unsigned int vertex) const
 	{
-		return vertex / m_nMaxLocalElements;
+		return vertex / m_nMaxLocalVertices;
 	}
 
 	/**
@@ -126,7 +126,7 @@ public:
 	 */
 	unsigned int posOfVert(unsigned int vertex) const
 	{
-		return vertex % m_nMaxLocalElements;
+		return vertex % m_nMaxLocalVertices;
 	}
 
 	/**
