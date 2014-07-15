@@ -280,7 +280,7 @@ public:
 				MPI_Recv(&size, 1, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
 				MPI_Recv(buf, size*2, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
 
-				for (unsigned int i = 0; i < size; i += 2)
+				for (unsigned int i = 0; i < size*2; i += 2)
 					groups[buf[i]] = buf[i+1];
 
 				recieved += size;
@@ -390,7 +390,7 @@ public:
 
 				MPI_Recv(buf, size*2, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
 
-				for (unsigned int i = 0; i < size; i += 2)
+				for (unsigned int i = 0; i < size*2; i += 2)
 					boundaries[buf[i]] = buf[i+1];
 			}
 
