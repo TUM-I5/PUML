@@ -412,7 +412,7 @@ private:
 	 * Swaps two pointers
 	 */
 	template<typename T>
-	static void swap(T* p1, T* p2)
+	static void swap(T* &p1, T* &p2)
 	{
 		T* tmp = p1;
 		p1 = p2;
