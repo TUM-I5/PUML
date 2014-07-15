@@ -114,7 +114,7 @@ public:
 				m_serialReader.readVertices(i * chunkSize, chunkSize, vertices);
 				waitIfRequest(request);
 				MPI_Isend(vertices, chunkSize*3, MPI_DOUBLE, i, 0, m_comm, &request);
-				swap(vertices, vertices);
+				swap(vertices, vertices2);
 			}
 
 			// Read last one

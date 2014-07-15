@@ -969,7 +969,7 @@ int main(int argc, char* argv[])
 
 	checkNcError(nc_close(ncFile));
 
-	logInfo(rank) << "Finished succesfully";
+	logInfo(rank) << "Finished successfully";
 
 #ifdef PARALLEL
 	MPI_Finalize();
