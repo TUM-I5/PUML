@@ -135,7 +135,7 @@ public:
 			if (m_rank == m_nProcs-1)
 				chunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
 
-			MPI_Recv(vertices, chunkSize*4, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
+			MPI_Recv(vertices, chunkSize*3, MPI_DOUBLE, 0, 0, m_comm, MPI_STATUS_IGNORE);
 		}
 	}
 
