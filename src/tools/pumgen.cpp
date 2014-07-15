@@ -851,7 +851,12 @@ int main(int argc, char* argv[])
 	double* localVertices = new double[maxVertices*3];
 	bool* localVerticesTransfered = new bool[maxVertices]; // True if we already have the corresponding vertex
 
+#ifdef PARALLEL
+	MPI_Win_fence(0, verticesWindow);
+#endif // PARALLEL
+
 	for (unsigned int i = 0; i < nMaxLocalPart; i++) {
+
 		if (i < nLocalPart) {
 			// Only get the coordinates if this is a real partition
 			memset(localVerticesTransfered, 0, sizeof(bool)*maxVertices);
@@ -864,17 +869,20 @@ int main(int argc, char* argv[])
 
 				// Get the vertices
 #ifdef PARALLEL
-				MPI_Win_lock(MPI_LOCK_SHARED, mesh.rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
 				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
 						mesh.rankOfVert(j->first), mesh.posOfVert(j->first)*3, 3, MPI_DOUBLE,
 						verticesWindow);
-				MPI_Win_unlock(mesh.rankOfVert(j->first), verticesWindow);
 #else // PARALLEL
 				// TODO
 #endif // PARALLEL
+
 				localVerticesTransfered[j->second] = true;
 			}
 		}
+
+#ifdef PARALLEL
+		MPI_Win_fence(0, verticesWindow);
+#endif // PARALLEL
 
 		// Writing is a collective operation. If we do not have enough partitions,
 		// we simply write the last one several times
