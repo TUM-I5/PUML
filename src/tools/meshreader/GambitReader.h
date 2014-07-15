@@ -248,6 +248,7 @@ public:
 			int x;
 			std::istringstream ss(line);
 			ss >> m_boundaries[i].type;
+			m_boundaries[i].type %= 100; // Fix boundary type TODO not sure where this should be placed
 			ss >> x;
 			ss >> m_boundaries[i].nLines;
 
