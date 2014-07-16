@@ -47,6 +47,10 @@ vars.AddVariables(
                 'logging level. \'debug\' prints all information available, \'info\' prints information at runtime (time step, plot number), \'warning\' prints warnings during runtime, \'error\' is most basic and prints errors only',
                 'info',
                 allowed_values=('debug', 'info', 'warning', 'error')
+              ),
+                  
+  BoolVariable( 'simModSuite', 'compile with support for simModSuite from Simmetrix',
+                False
               )
 )
 
@@ -114,7 +118,7 @@ if 'cxx' in env:
   env['CXX'] = env['cxx']
 else:
   if env['parallelization'] in ['mpi']:
-    env['CXX'] = 'mpiCC'
+    env['CXX'] = 'mpicxx'
   else:
     env['CXX'] = 'g++'
 
@@ -148,9 +152,6 @@ env.Append(CPPPATH=['#/src'])
 # Add prefix path
 env.Tool('PrefixPathTool')
 
-#
-# add libraries
-#
 # netCDF
 env.Tool('NetcdfTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 
@@ -178,6 +179,10 @@ env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
 # ParMETIS
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
+# SimModSuite
+if env['simModSuite']:
+    env.tools.Tool('SimModSuiteTool', required=True)
+    env.tools.Append(CPPDEFINES=['USE_SIMMOD'])
 
 # get the source files
 env.sourceFiles = {}
