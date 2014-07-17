@@ -26,6 +26,11 @@ def generate(env, **kw):
     else:
         rpath = True
         
+    if 'mpiLib' in kw:
+        mpi = kw['mpiLib']
+    else:
+        mpi = 'mpich2'
+        
     # TODO support different configurations
     libPath = [p for p in map(lambda p: os.path.join(p, 'x64_rhel5_gcc41'), env['LIBPATH']) if os.path.exists(p)]
     env.AppendUnique(LIBPATH=libPath)
@@ -47,8 +52,8 @@ def generate(env, **kw):
     
     # TODO not all libraries may be available/required
     # TODO different parasolid versions not handled currently
-    libs = ['SimMeshTools', 'SimParasolid260', 'SimPartitionedMesh',
-            'SimPartitionWrapper', 'SimModel', 'pskernel']
+    libs = ['SimMeshTools', 'SimParasolid260', 'SimPartitionedMesh-mpi',
+            'SimPartitionWrapper-'+mpi, 'SimModel', 'pskernel']
     for l in libs:
         if not conf.CheckLib(l):
             if required:

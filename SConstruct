@@ -51,6 +51,11 @@ vars.AddVariables(
                   
   BoolVariable( 'simModSuite', 'compile with support for simModSuite from Simmetrix',
                 False
+              ),
+                  
+  EnumVariable( 'mpiLib', 'MPI library against this is linked (only required for simModSuite',
+                'mpich2',
+                allowed_values=('openmpi', 'mpich', 'mpich2')
               )
 )
 
@@ -181,7 +186,7 @@ env.tools.Append(LINKFLAGS= ['-fopenmp'])
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 # SimModSuite
 if env['simModSuite']:
-    env.tools.Tool('SimModSuiteTool', required=True)
+    env.tools.Tool('SimModSuiteTool', mpiLib=env['mpiLib'], required=True)
     env.tools.Append(CPPDEFINES=['USE_SIMMOD'])
 
 # get the source files
