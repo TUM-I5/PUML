@@ -53,9 +53,9 @@ vars.AddVariables(
                 False
               ),
                   
-  EnumVariable( 'mpiLib', 'MPI library against this is linked (only required for simModSuite',
+  ( 'mpiLib', 'MPI library against this is linked (only required for simModSuite)',
                 'mpich2',
-                allowed_values=('openmpi', 'mpich', 'mpich2')
+                None, None
               )
 )
 
