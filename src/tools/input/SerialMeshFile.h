@@ -17,11 +17,13 @@
 #include <mpi.h>
 #endif // PARALLEL
 
+#include "MeshInput.h"
+
 /**
  * Read a mesh from a serial file
  */
 template<typename T>
-class SerialMeshFile
+class SerialMeshFile : public MeshInput
 {
 private:
 #ifdef PARALLEL
@@ -33,12 +35,8 @@ private:
 
 	T m_meshReader;
 
-	/** Number of local vertices */
-	unsigned int m_nLocalVertices;
 	/** Maximum number of local vertices */
 	unsigned int m_nMaxLocalVertices;
-	/** Number of local elements */
-	unsigned int m_nLocalElements;
 	/** Maximum number of local elements */
 	unsigned int m_nMaxLocalElements;
 
@@ -76,41 +74,18 @@ public:
 	{
 		m_meshReader.open(meshFile);
 
+		setNVertices(m_meshReader.nVertices());
+		setNElements(m_meshReader.nElements());
+
 		m_nMaxLocalVertices = (nVertices() + m_nProcs - 1) / m_nProcs;
 		m_nMaxLocalElements = (nElements() + m_nProcs - 1) / m_nProcs;
 		if (m_rank == m_nProcs - 1) {
-			m_nLocalVertices = nVertices() - (m_nProcs-1) * m_nMaxLocalVertices;
-			m_nLocalElements = nElements() - (m_nProcs-1) * m_nMaxLocalElements;
+			setNLocalVertices(nVertices() - (m_nProcs-1) * m_nMaxLocalVertices);
+			setNLocalElements(nElements() - (m_nProcs-1) * m_nMaxLocalElements);
 		} else {
-			m_nLocalVertices = m_nMaxLocalVertices;
-			m_nLocalElements = m_nMaxLocalElements;
+			setNLocalVertices(m_nMaxLocalVertices);
+			setNLocalElements(m_nMaxLocalElements);
 		}
-	}
-
-	unsigned int nVertices() const
-	{
-		return m_meshReader.nVertices();
-	}
-
-	unsigned int nElements() const
-	{
-		return m_meshReader.nElements();
-	}
-
-	/**
-	 * Number of vertices this process is responsible for
-	 */
-	unsigned int nLocalVertices() const
-	{
-		return m_nLocalVertices;
-	}
-
-	/**
-	 * Number of elements this process is responsible for
-	 */
-	unsigned int nLocalElements() const
-	{
-		return m_nLocalElements;
 	}
 
 	/**

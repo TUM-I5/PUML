@@ -7,17 +7,12 @@
 #  notice in the file 'COPYING' at the root directory of this package
 #  and the copyright notice at https://github.com/TUM-I5/PUML
 # 
-# @copyright 2013 Technische Universitaet Muenchen
+# @copyright 2014 Technische Universitaet Muenchen
 # @author Sebastian Rettenberger <rettenbs@in.tum.de>
 #
 
 Import('env')
 
-env.sourceFiles['pumgen'] = [env.tools.Object('pumgen.cpp')]
-
-for dir in ['input', 'meshreader']:
-    Export('env')
-    SConscript(dir+'/SConscript', variant_dir='#/'+env['buildDir']+'/src', src_dir='#/src', duplicate=0)
-    Import('env')
+env.sourceFiles['pumgen'].append(env.tools.Object('SimModSuite.cpp'))
 
 Export('env')
