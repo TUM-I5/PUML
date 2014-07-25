@@ -112,7 +112,7 @@ public:
 			for (int i = 1; i < m_nProcs-1; i++) {
 				logInfo() << "Reading vertices part" << i << "of" << m_nProcs;
 				m_serialReader.readVertices(i * chunkSize, chunkSize, vertices);
-				waitIfRequest(request);
+				MPI_Wait(&request, MPI_STATUS_IGNORE);
 				MPI_Isend(vertices, chunkSize*3, MPI_DOUBLE, i, 0, m_comm, &request);
 				swap(vertices, vertices2);
 			}
@@ -121,14 +121,14 @@ public:
 			unsigned int lastChunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
 			logInfo() << "Reading vertices part" << (m_nProcs-1) << "of" << m_nProcs;
 			m_serialReader.readVertices((m_nProcs-1) * chunkSize, lastChunkSize, vertices);
-			waitIfRequest(request);
+			MPI_Wait(&request, MPI_STATUS_IGNORE);
 			MPI_Isend(vertices, lastChunkSize*3, MPI_DOUBLE, m_nProcs-1, 0, m_comm, &request);
 			swap(vertices, vertices2);
 
 			// Finally read the first part
 			logInfo() << "Reading vertices part" << m_nProcs << "of" << m_nProcs;
 			m_serialReader.readVertices(0, chunkSize, vertices);
-			waitIfRequest(request);
+			MPI_Wait(&request, MPI_STATUS_IGNORE);
 
 			delete [] vertices2;
 		} else {
@@ -165,7 +165,7 @@ public:
 			for (int i = 1; i < m_nProcs-1; i++) {
 				logInfo() << "Reading elements part" << i << "of" << m_nProcs;
 				m_serialReader.readElements(i * chunkSize, chunkSize, elements);
-				waitIfRequest(request);
+				MPI_Wait(&request, MPI_STATUS_IGNORE);
 				MPI_Isend(elements, chunkSize*4, MPI_UNSIGNED, i, 0, m_comm, &request);
 				swap(elements, elements2);
 			}
@@ -174,14 +174,14 @@ public:
 			unsigned int lastChunkSize = m_nElements - (m_nProcs-1) * chunkSize;
 			logInfo() << "Reading elements part" << (m_nProcs-1) << "of" << m_nProcs;
 			m_serialReader.readElements((m_nProcs-1) * chunkSize, lastChunkSize, elements);
-			waitIfRequest(request);
+			MPI_Wait(&request, MPI_STATUS_IGNORE);
 			MPI_Isend(elements, lastChunkSize*4, MPI_UNSIGNED, m_nProcs-1, 0, m_comm, &request);
 			swap(elements, elements2);
 
 			// Finally read the first part
 			logInfo() << "Reading elements part" << m_nProcs << "of" << m_nProcs;
 			m_serialReader.readElements(0, chunkSize, elements);
-			waitIfRequest(request);
+			MPI_Wait(&request, MPI_STATUS_IGNORE);
 
 			delete [] elements2;
 		} else {
@@ -225,11 +225,9 @@ public:
 				m_serialReader.readGroups(i*maxChunkSize, chunkSize, map);
 
 				// Wait for all sending from last iteration
-				for (int j = 0; j < m_nProcs-1; j++) {
-					waitIfRequest(requests[j*2]);
-					waitIfRequest(requests[j*2+1]);
+				MPI_Waitall((m_nProcs-1)*2, requests, MPI_STATUSES_IGNORE);
+				for (int j = 0; j < m_nProcs-1; j++)
 					aggregator[j].clear();
-				}
 
 				// Sort group numbers into the corresponding aggregator
 				for (unsigned int j = 0; j < chunkSize; j++) {
@@ -257,10 +255,7 @@ public:
 				}
 			}
 
-			for (int i = 0; i < m_nProcs-1; i++) {
-				waitIfRequest(requests[i*2]);
-				waitIfRequest(requests[i*2+1]);
-			}
+			MPI_Waitall((m_nProcs-1)*2, requests, MPI_STATUSES_IGNORE);
 
 			delete [] map;
 			delete [] aggregator;
@@ -325,11 +320,9 @@ public:
 				m_serialReader.readBoundaries(i*maxChunkSize, chunkSize, faces);
 
 				// Wait for all sending from last iteration
-				for (int j = 0; j < m_nProcs-1; j++) {
-					waitIfRequest(requests[j*2]);
-					waitIfRequest(requests[j*2+1]);
+				MPI_Waitall((m_nProcs-1)*2, requests, MPI_STATUSES_IGNORE);
+				for (int j = 0; j < m_nProcs-1; j++)
 					aggregator[j].clear();
-				}
 
 				// Sort boundary conditions into the corresponding aggregator
 				for (unsigned int j = 0; j < chunkSize; j++) {
@@ -358,10 +351,7 @@ public:
 				}
 			}
 
-			for (int i = 0; i < m_nProcs-1; i++) {
-				waitIfRequest(requests[i*2]);
-				waitIfRequest(requests[i*2+1]);
-			}
+			MPI_Waitall((m_nProcs-1)*2, requests, MPI_STATUSES_IGNORE);
 
 			delete [] faces;
 			delete [] aggregator;
@@ -417,15 +407,6 @@ private:
 		T* tmp = p1;
 		p1 = p2;
 		p2 = tmp;
-	}
-
-	/**
-	 * Waits for the MPI_Request if it is not NULL
-	 */
-	static void waitIfRequest(MPI_Request &request)
-	{
-		if (request != MPI_REQUEST_NULL)
-			MPI_Wait(&request, MPI_STATUS_IGNORE);
 	}
 };
 
