@@ -229,7 +229,7 @@ public:
         		continue;
 
         	int localId = EN_id(v) - m_vertStart[PMU_rank()];
-        	assert(localId > 0 && localId < nLocalVertices());
+        	assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalVertices());
 
         	V_coord(v, &vertices[localId*3]);
         }
@@ -244,7 +244,7 @@ public:
 			assert(r);
 
 			int localId = EN_id(r) - m_elemStart[PMU_rank()];
-			assert(localId > 0 && localId < nLocalElements());
+			assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalElements());
 
 			pPList vertices = R_vertices(r, 1); // 1 should be the correct ordering ...
 			// TODO assuming tetrahedra
@@ -290,7 +290,8 @@ public:
 
 						if (f == face) {
 							int localId = EN_id(r) - m_elemStart[PMU_rank()];
-							assert(localId > 0 && localId < nLocalElements());
+							assert(localId >= 0
+									&& static_cast<unsigned int>(localId) < nLocalElements());
 
 							boundaries[localId*4 + FACE2INTERNAL[j]] = boundary;
 
