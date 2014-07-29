@@ -30,6 +30,7 @@
 #include "utils/progress.h"
 
 #include "MeshInput.h"
+#include "SimModelerUtil.h"
 
 //forward declare
 pAManager SModel_attManager(pModel model);
@@ -124,9 +125,12 @@ public:
 		m_attMngr = SModel_attManager(m_model);
 
 		logInfo(PMU_rank()) << "Extracting cases";
-		m_meshCase = extractCase(meshCaseName);
-		m_analysisCase = extractCase(analysisCaseName);
 
+		MeshingOptions meshingOptions;
+		m_meshCase = MS_newMeshCase(m_model);
+		MS_setupSimModelerMeshCase(extractCase(meshCaseName), m_meshCase, &meshingOptions);
+
+		m_analysisCase = extractCase(analysisCaseName);
 		pPList children = AttNode_children(m_analysisCase);
 		void* iter = 0L;
 		while (pANode child = static_cast<pANode>(PList_next(children, &iter)))
@@ -309,13 +313,13 @@ public:
 private:
 	pACase extractCase(const char* name)
 	{
-        pACase acase = AMAN_findCase(m_attMngr, name);
-        if (!acase)
-                logError() << "Case" << std::string(name) << "not found.";
+		pACase acase = AMAN_findCase(m_attMngr, name);
+		if (!acase)
+			logError() << "Case" << std::string(name) << "not found.";
 
-        AttCase_setModel(acase, m_model);
+		AttCase_setModel(acase, m_model);
 
-        return acase;
+		return acase;
 	}
 
 private:
