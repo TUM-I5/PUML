@@ -183,7 +183,7 @@ int main(int argc, char* argv[])
 	args.addAdditionalOption("partition", "Number of partitions");
 	args.addAdditionalOption("output", "Output parallel unstructured mesh file", false);
 
-	if (args.parse(argc, argv) != utils::Args::Success)
+	if (args.parse(argc, argv, rank == 0) != utils::Args::Success)
 		return 1;
 
 	const char* inputFile = args.getAdditionalArgument<const char*>("input");
