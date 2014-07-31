@@ -177,7 +177,7 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("mesh", 0, "Mesh attributes name (only used by SimModSuite, default: \"mesh\")",
 			utils::Args::Required, false);
-	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\"",
+	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
 			utils::Args::Required, false);
 	args.addAdditionalOption("input", "Input file (mesh or CAD)");
 	args.addAdditionalOption("partition", "Number of partitions");
