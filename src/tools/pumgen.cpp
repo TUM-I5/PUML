@@ -896,11 +896,11 @@ int main(int argc, char* argv[])
 
 				// Get the vertices
 #ifdef PARALLEL
-				MPI_Win_lock(MPI_LOCK_SHARED, mesh.rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
+				MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
 				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
 						mesh->rankOfVert(j->first), mesh->posOfVert(j->first)*3, 3, MPI_DOUBLE,
 						verticesWindow);
-				MPI_Win_unlock(mesh.rankOfVert(j->first), verticesWindow);
+				MPI_Win_unlock(mesh->rankOfVert(j->first), verticesWindow);
 #else // PARALLEL
 				// TODO
 #endif // PARALLEL
