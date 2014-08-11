@@ -68,13 +68,14 @@ public:
 	SimModSuite(const char* cadFile, const char* modFile = 0L,
 			const char* licenseFile = 0L,
 			const char* meshCaseName = "mesh",
-			const char* analysisCaseName = "analysis")
+			const char* analysisCaseName = "analysis",
+			int enforceSize = 0)
 		: m_model(0L)
 	{
 
 		init(licenseFile);
 
-		open(cadFile, modFile, meshCaseName, analysisCaseName);
+		open(cadFile, modFile, meshCaseName, analysisCaseName, enforceSize);
 	}
 
 	virtual ~SimModSuite()
@@ -100,7 +101,8 @@ public:
 	}
 
 	void open(const char* cadFile, const char* modFile,
-			const char* meshCaseName = "mesh", const char* analysisCaseName = "analysis")
+			const char* meshCaseName = "mesh", const char* analysisCaseName = "analysis",
+			int forceSize = 0)
 	{
 		logInfo(PMU_rank()) << "Loading model";
 		pNativeModel nativeModel = ParasolidNM_createFromFile(cadFile, 0);
@@ -150,6 +152,7 @@ public:
 
         logInfo(PMU_rank()) << "Starting the volume mesher";
         pVolumeMesher volumeMesher = VolumeMesher_new(m_meshCase, m_mesh);
+        VolumeMesher_setEnforceSize(volumeMesher, forceSize);
         progressBar.setTotal(6);
         VolumeMesher_execute(volumeMesher, prog);
 
