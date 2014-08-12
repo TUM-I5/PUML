@@ -40,6 +40,9 @@
 #else // PARALLEL
 #include "meshreader/GambitReader.h"
 #endif // PARALLEL
+#ifdef USE_APF
+#include "input/Apf.h"
+#endif // USE_APF
 #ifdef USE_SIMMOD
 #include "input/SimModSuite.h"
 #endif // USE_SIMMOD
@@ -169,15 +172,15 @@ int main(int argc, char* argv[])
 
 	// Parse command line arguments
 	utils::Args args;
-	const char* source[] = {"gambit", "simmodsuite"};
+	const char* source[] = {"gambit", "simmodsuite", "apf"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
-	args.addOption("license", 'l', "License file (only used by SimModSuite)",
+	args.addOption("license", 'l', "License file (only used by SimModSuite and APF)",
 			utils::Args::Required, false);
-	args.addOption("model", 'm', "Model file (only used by SimModSuite)",
+	args.addOption("model", 'm', "Model file (only used by SimModSuite and APF)",
 			utils::Args::Required, false);
-	args.addOption("mesh", 0, "Mesh attributes name (only used by SimModSuite, default: \"mesh\")",
+	args.addOption("mesh", 0, "Mesh attributes name (only used by SimModSuite APF, default: \"mesh\")",
 			utils::Args::Required, false);
-	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
+	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite and APF, default: \"analysis\")",
 			utils::Args::Required, false);
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
@@ -233,6 +236,27 @@ int main(int argc, char* argv[])
 #else // USE_SIMMOD
 		logError() << "SimModSuite is not supported in this version";
 #endif // USE_SIMMOD
+		break;
+	case 2:
+#ifdef USE_APF
+		logInfo(rank) << "Using APF";
+
+		{
+		SimModSuite* meshSource = new SimModSuite(inputFile,
+				args.getArgument<const char*>("model", 0L),
+				args.getArgument<const char*>("license", 0L),
+				args.getArgument<const char*>("mesh", "mesh"),
+				args.getArgument<const char*>("analysis", "analysis"),
+				args.getArgument<int>("enforce-size", 0));
+
+		mesh = new Apf(*meshSource);
+
+		delete meshSource;
+		}
+
+#else // USE_APF
+		logError() << "APF is not supported in this version";
+#endif // USE_APF
 		break;
 	default:
 		logError() << "Unknown source";

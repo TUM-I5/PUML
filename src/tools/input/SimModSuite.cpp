@@ -12,5 +12,5 @@
 
 #include "SimModSuite.h"
 
-utils::Progress SimModSuite::progressBar;
 const unsigned int SimModSuite::FACE2INTERNAL[] = {0, 1, 3, 2};
+utils::Progress SimModSuite::progressBar;

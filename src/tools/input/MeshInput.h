@@ -29,8 +29,6 @@ private:
 public:
 	virtual ~MeshInput() {}
 
-	virtual void open(const char* filename) = 0;
-
 	unsigned int nVertices() const
 	{
 		return m_nVertices;
@@ -44,12 +42,12 @@ public:
 	/**
 	 * Number of vertices this process is responsible for
 	 */
-	virtual unsigned int nLocalVertices() const
+	unsigned int nLocalVertices() const
 	{
 		return m_nLocalVertices;
 	}
 
-	virtual unsigned int nLocalElements() const
+	unsigned int nLocalElements() const
 	{
 		return m_nLocalElements;
 	}

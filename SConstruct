@@ -56,7 +56,11 @@ vars.AddVariables(
   ( 'mpiLib', 'MPI library against this is linked (only required for simModSuite)',
                 'mpich2',
                 None, None
-              )
+              ),
+                  
+   BoolVariable( 'apf', 'compile with Scorecs APF library',
+                 False
+               )
 )
 
 env.Tool('PrefixPathTool')
@@ -184,6 +188,13 @@ env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
 # ParMETIS
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
+# APF
+if env['apf']:
+    env.tools.Tool('ApfTool', required=True)
+    env.tools.Append(CPPDEFINES=['USE_APF'])
+    if not env['simModSuite']:
+        print 'APF requires Simmetrix Simulation Modeling Suite, automatically selecting it' 
+        env['simModSuite'] = True
 # SimModSuite
 if env['simModSuite']:
     env.tools.Tool('SimModSuiteTool', mpiLib=env['mpiLib'], required=True)

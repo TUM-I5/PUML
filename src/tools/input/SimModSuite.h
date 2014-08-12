@@ -29,7 +29,7 @@
 #include "utils/logger.h"
 #include "utils/progress.h"
 
-#include "MeshInput.h"
+#include "MeshGenerator.h"
 #include "SimModelerUtil.h"
 
 //forward declare
@@ -40,7 +40,7 @@ pAManager SModel_attManager(pModel model);
  *  of this class
  * @todo Maybe add MS_setMaxEntities to limit the number of elements
  */
-class SimModSuite : public MeshInput
+class SimModSuite : public MeshGenerator
 {
 private:
 	pGModel m_model;
@@ -53,16 +53,14 @@ private:
 	pParMesh m_mesh;
 	pMesh m_localMesh;
 
-	/** The global id of the first vertex on each process */
-	unsigned int* m_vertStart;
-	/** The global id of the first element on each process */
-	unsigned int* m_elemStart;
+	/** True of the mesh is already generated */
+	bool m_isGenerated;
 
 public:
 	SimModSuite(const char* licenseFile = 0L)
-		: m_model(0L)
+		: m_model(0L), m_isGenerated(false)
 	{
-		init(licenseFile);
+		_init(licenseFile);
 	}
 
 	SimModSuite(const char* cadFile, const char* modFile = 0L,
@@ -70,21 +68,18 @@ public:
 			const char* meshCaseName = "mesh",
 			const char* analysisCaseName = "analysis",
 			int enforceSize = 0)
-		: m_model(0L)
+		: m_model(0L), m_isGenerated(false)
 	{
 
-		init(licenseFile);
+		_init(licenseFile);
 
-		open(cadFile, modFile, meshCaseName, analysisCaseName, enforceSize);
+		generate(cadFile, modFile, meshCaseName, analysisCaseName, enforceSize);
 	}
 
 	virtual ~SimModSuite()
 	{
 		if (m_model) {
 			// TODO delete mesh, model, etc
-
-			delete [] m_vertStart;
-			delete [] m_elemStart;
 		}
 
 		SimParasolid_stop(1);
@@ -95,12 +90,7 @@ public:
 		SimPartitionedMesh_stop();
 	}
 
-	void open(const char* cadFile)
-	{
-		open(cadFile, 0L);
-	}
-
-	void open(const char* cadFile, const char* modFile,
+	void generate(const char* cadFile, const char* modFile,
 			const char* meshCaseName = "mesh", const char* analysisCaseName = "analysis",
 			int forceSize = 0)
 	{
@@ -188,44 +178,14 @@ public:
         setNLocalVertices(M_numVertices(m_localMesh) - numSlaveVertices);
         setNLocalElements(M_numRegions(m_localMesh));
 
-        // Compute id of the first element for each process
-        unsigned int start[] = {nLocalVertices(), nLocalElements()};
-        MPI_Scan(MPI_IN_PLACE, start, 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
+        init();
 
-        m_vertStart = new unsigned int[PMU_size()];
-        m_vertStart[PMU_rank()] = start[0] - nLocalVertices();
-        MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, m_vertStart, 1, MPI_UNSIGNED,
-        		MPI_COMM_WORLD);
-
-        m_elemStart = new unsigned int[PMU_size()];
-        m_elemStart[PMU_rank()] = start[1] - nLocalElements();
-        MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, m_elemStart, 1, MPI_UNSIGNED,
-        		MPI_COMM_WORLD);
+        m_isGenerated = true;
 	}
 
-	int rankOfVert(unsigned int vertex) const
+	bool isGenerated() const
 	{
-		return std::upper_bound(m_vertStart, m_vertStart+PMU_size(), vertex) - m_vertStart - 1;
-	}
-
-	unsigned int posOfVert(unsigned int vertex) const
-	{
-		return vertex - m_vertStart[rankOfVert(vertex)];
-	}
-
-	unsigned int elemStart(int rank) const
-	{
-		return m_elemStart[rank];
-	}
-
-	int rankOfElem(unsigned int element) const
-	{
-		return std::upper_bound(m_elemStart, m_elemStart+PMU_size(), element) - m_elemStart - 1;
-	}
-
-	unsigned int posOfElem(unsigned int element) const
-	{
-		return element - m_elemStart[rankOfElem(element)];
+		return m_isGenerated;
 	}
 
 	void getVertices(double* vertices)
@@ -235,7 +195,7 @@ public:
         	if (!EN_isOwnerProc(v))
         		continue;
 
-        	int localId = EN_id(v) - m_vertStart[PMU_rank()];
+        	int localId = EN_id(v) - vertStart(PMU_rank());
         	assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalVertices());
 
         	V_coord(v, &vertices[localId*3]);
@@ -250,7 +210,7 @@ public:
 			pRegion r = RIter_next(riter);
 			assert(r);
 
-			int localId = EN_id(r) - m_elemStart[PMU_rank()];
+			int localId = EN_id(r) - elemStart(PMU_rank());
 			assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalElements());
 
 			pPList vertices = R_vertices(r, 1); // 1 should be the correct ordering ...
@@ -296,7 +256,7 @@ public:
 						pFace f = R_face(r, j);
 
 						if (f == face) {
-							int localId = EN_id(r) - m_elemStart[PMU_rank()];
+							int localId = EN_id(r) - elemStart(PMU_rank());
 							assert(localId >= 0
 									&& static_cast<unsigned int>(localId) < nLocalElements());
 
@@ -313,6 +273,30 @@ public:
 		AttCase_unassociate(m_analysisCase);
 	}
 
+	/**
+	 * Provides direct access to the SimModSuite model. Should be used with caution.
+	 */
+	pGModel model()
+	{
+		return m_model;
+	}
+
+	/**
+	 * Provides direct access to the SimModSuite mesh. Should be used with caution.
+	 */
+	pParMesh mesh()
+	{
+		return m_mesh;
+	}
+
+	/**
+	 * Provides direct access to the SimModSuite analysis case. Should be used with caution.
+	 */
+	pACase analysisCase()
+	{
+		return m_analysisCase;
+	}
+
 private:
 	pACase extractCase(const char* name)
 	{
@@ -325,17 +309,10 @@ private:
 		return acase;
 	}
 
-private:
-	static void init(const char* licenseFile)
-	{
-		SimPartitionedMesh_start(0L, 0L);
-		Sim_readLicenseFile(licenseFile);
-		MS_init();
-		SimParasolid_start(1);
-
-		Sim_setMessageHandler(messageHandler);
-	}
-
+public:
+	/**
+	 * @todo Make this private as soon as APF does no longer need it
+	 */
 	static unsigned int parseBoundary(const char* boundaryCondition)
 	{
 		if (strcmp(boundaryCondition, "freeSurface") == 0)
@@ -347,6 +324,17 @@ private:
 
 		logError() << "Unknown boundary condition" << boundaryCondition;
 		return -1;
+	}
+
+private:
+	static void _init(const char* licenseFile)
+	{
+		SimPartitionedMesh_start(0L, 0L);
+		Sim_readLicenseFile(licenseFile);
+		MS_init();
+		SimParasolid_start(1);
+
+		Sim_setMessageHandler(messageHandler);
 	}
 
 	static void messageHandler(int type, const char* msg)
@@ -392,8 +380,11 @@ private:
 		logDebug() << what << level << startVal << endVal << currentVal;
 	}
 
-	static utils::Progress progressBar;
+public:
 	static const unsigned int FACE2INTERNAL[];
+
+private:
+	static utils::Progress progressBar;
 
 };
 
