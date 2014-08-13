@@ -28,7 +28,7 @@ def generate(env, **kw):
             return
         
     # Additional libs
-    libs = ['gmi', 'mds', 'apf_sim', 'apf', 'pcu']
+    libs = ['gmi', 'ma', 'mds', 'apf_sim', 'apf', 'pcu']
     for l in libs:
         if not conf.CheckLib(l):
             if required:

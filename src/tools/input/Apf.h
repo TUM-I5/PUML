@@ -20,6 +20,7 @@
 #include <apfSIM.h>
 #include <apfShape.h>
 #include <gmi_sim.h>
+#include <maMesh.h>
 #include <PCU.h>
 
 #include "utils/logger.h"
@@ -133,6 +134,16 @@ public:
 		}
 		m_mesh->end(fiter);
 		AttCase_unassociate(meshSource.analysisCase());
+
+		// Compute min insphere radius
+		double min = std::numeric_limits<double>::max();
+		apf::MeshIterator* eiter = m_mesh->begin(3);
+		while (apf::MeshEntity* element = m_mesh->iterate(eiter)) {
+			min = std::min(min, ma::getInsphere(m_mesh, element));
+		}
+		MPI_Reduce((PCU_Comm_Self() == 0 ? MPI_IN_PLACE : &min),
+				&min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+		logInfo(PCU_Comm_Self()) << "Minimum insphere found:" << min;
 	}
 
 	void getVertices(double* vertices)
