@@ -93,6 +93,7 @@ private:
 		apf::GlobalToVert vertMap;
 		int* elements = new int[nLocalElements*4];
 		m_meshReader.readElements(elements);
+		logInfo(m_rank) << "Create APF connectivity";
 		apf::construct(m_mesh, elements, nLocalElements, apf::Mesh::TET, vertMap);
 		delete [] elements;
 
@@ -102,6 +103,7 @@ private:
 		// Set vertices
 		double* vertices = new double[nLocalVertices*3];
 		m_meshReader.readVertices(vertices);
+		logInfo(m_rank) << "Set coordinates in APF";
 		apf::setCoords(m_mesh, vertices, nLocalVertices, vertMap);
 
 		// Set boundaries
