@@ -236,9 +236,20 @@ public:
 			return;
 		}
 
-		for (unsigned int i = 0; i < nLocalElements(); i++)
-			// TODO get the group from the model region
-			groups[i] = 0;
+		apf::MeshIterator* it = m_mesh->begin(3);
+		while (apf::MeshEntity* element = m_mesh->iterate(it)) {
+			assert(m_mesh->isOwned(element));
+			assert(m_mesh->hasTag(element, m_groupTag));
+
+			long localId = apf::getNumber(m_elementNum, apf::Node(element, 0))
+					- elemStart(PCU_Comm_Self());
+			assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalElements());
+
+			int group;
+			m_mesh->getIntTag(element, m_groupTag, &group);
+			groups[localId] = group;
+		}
+		m_mesh->end(it);
 	}
 
 	void getBoundaries(unsigned int* boundaries)
@@ -246,8 +257,8 @@ public:
 		if (!m_boundaryTag)
 			return;
 
-		apf::MeshIterator* eiter = m_mesh->begin(3);
-		while (apf::MeshEntity* element = m_mesh->iterate(eiter)) {
+		apf::MeshIterator* it = m_mesh->begin(3);
+		while (apf::MeshEntity* element = m_mesh->iterate(it)) {
 			assert(m_mesh->isOwned(element));
 
 			long localId = apf::getNumber(m_elementNum, apf::Node(element, 0))
@@ -267,7 +278,7 @@ public:
 				boundaries[localId*4 + FACE2INTERNAL[i]] = tag;
 			}
 		}
-		m_mesh->end(eiter);
+		m_mesh->end(it);
 	}
 
 private:
