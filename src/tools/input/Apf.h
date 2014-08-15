@@ -17,20 +17,18 @@
 #include <apfMDS.h>
 #include <apfMesh2.h>
 #include <apfNumbering.h>
-#include <apfSIM.h>
 #include <apfShape.h>
-#include <gmi_sim.h>
 #include <maMesh.h>
 #include <PCU.h>
 
 #include "utils/logger.h"
 
-#include "MeshGenerator.h"
-#include "SimModSuite.h"
-
-class Apf : public MeshGenerator
+class Apf
 {
 private:
+	/** Number of processes */
+	int m_nProcs;
+
 	/** APF mesh */
 	apf::Mesh2* m_mesh;
 
@@ -43,97 +41,73 @@ private:
 	/** Tag for the boundary condition */
 	apf::MeshTag* m_boundaryTag;
 
+	/** Tag for the group */
+	apf::MeshTag* m_groupTag;
+
+	unsigned int m_nVertices;
+	unsigned int m_nElements;
+
+	/** Number of local vertices */
+	unsigned int m_nLocalVertices;
+	/** Number of local elements */
+	unsigned int m_nLocalElements;
+
+	/** The global id of the first vertex on each process */
+	unsigned int* m_vertStart;
+	/** The global id of the first element on each process */
+	unsigned int* m_elemStart;
+
 public:
-	Apf()
-		: m_mesh(0L)
-	{
-		_init();
-	}
-
-	Apf(SimModSuite &meshSource)
-		: m_mesh(0L)
-	{
-		_init();
-		load(meshSource);
-	}
-
-	virtual ~Apf()
-	{
-		if (m_mesh) {
-			apf::destroyGlobalNumbering(m_vertexNum);
-			apf::destroyGlobalNumbering(m_elementNum);
-
-			m_mesh->destroyTag(m_boundaryTag);
-
-			m_mesh->destroyNative();
-			apf::destroyMesh(m_mesh);
-		}
-
-		PCU_Comm_Free();
-	}
-
 	/**
-	 * Initializes APF data structures. Has to be called after the mesh is
-	 * generated.
+	 * @param mesh An apf mesh. The mesh will be automatically
+	 *  destoryed when this instance ins deleted.
 	 */
-	void load(SimModSuite &meshSource)
+	Apf(apf::Mesh2* mesh)
+		: m_mesh(mesh)
 	{
-		if (!meshSource.isGenerated())
-			logError() << "Can not initialize APF, mesh not generated.";
+		int rank = PCU_Comm_Self();
+		m_nProcs = PCU_Comm_Peers();
 
-		apf::Mesh* mesh = apf::createMesh(meshSource.mesh());
-		gmi_register_sim();
-		gmi_model* model = gmi_import_sim(meshSource.model());
-
-		logInfo(PCU_Comm_Self()) << "Converting data structure";
-		m_mesh = apf::createMdsMesh(model, mesh);
-		apf::destroyMesh(mesh);
-
+		// Check mesh
 		if (alignMdsMatches(m_mesh))
 			logWarning() << "Fixed misaligned matches";
-		m_mesh->verify();
+		mesh->verify();
 
+		// Create numberings
 		m_vertexNum = apf::makeGlobal(
-				apf::numberOwnedDimension(m_mesh, "vertices", 0));
+				apf::numberOwnedDimension(mesh, "vertices", 0));
 		apf::synchronize(m_vertexNum);
 		m_elementNum = apf::makeGlobal(
-				apf::numberOwnedDimension(m_mesh, "elements", 3));
+				apf::numberOwnedDimension(mesh, "elements", 3));
 
-		setNLocalVertices(apf::countOwned(m_mesh, 0));
-		setNLocalElements(apf::countOwned(m_mesh, 3));
+		// Get tags
+		m_boundaryTag = mesh->findTag("boundary condition");
+		m_groupTag = mesh->findTag("group");
+
+		// Get local size
+		m_nLocalVertices = apf::countOwned(mesh, 0);
+		m_nLocalElements = apf::countOwned(mesh, 3);
 
 		// Get the total number of vertices/elements
-		unsigned int size[2] = {nLocalVertices(), nLocalElements()};
+		unsigned int size[2] = {m_nLocalVertices, m_nLocalElements};
 		MPI_Allreduce(MPI_IN_PLACE, size, 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
 
-		setNVertices(size[0]);
-		setNElements(size[1]);
+		m_nVertices = size[0];
+		m_nElements = size[1];
 
-		init();
+		// Initialize mapping arrays
+        unsigned int start[2] = {m_nLocalVertices, m_nLocalElements};
+        MPI_Scan(MPI_IN_PLACE, start, 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
 
-		// Set the boundary conditions from the geometric model
-		AttCase_associate(meshSource.analysisCase(), 0L);
-		m_boundaryTag = m_mesh->createIntTag("boundary condition", 1);
-		apf::MeshIterator* fiter = m_mesh->begin(2);
-		while (apf::MeshEntity* face = m_mesh->iterate(fiter)) {
-			apf::ModelEntity* modelFace = m_mesh->toModel(face);
-			if (m_mesh->getModelType(modelFace) != 2)
-				continue;
+        m_vertStart = new unsigned int[m_nProcs];
+        m_vertStart[rank] = start[0] - m_nLocalVertices;
+        MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, m_vertStart, 1, MPI_UNSIGNED,
+        		MPI_COMM_WORLD);
 
-			pGEntity simFace = reinterpret_cast<pGEntity>(modelFace);
-
-			pAttribute attr = GEN_attrib(simFace, "boundaryCondition");
-			if (attr) {
-				char* image = Attribute_imageClass(attr);
-				int boundary = SimModSuite::parseBoundary(image);
-				Sim_deleteString(image);
-
-				m_mesh->setIntTag(face, m_boundaryTag, &boundary);
-			}
-
-		}
-		m_mesh->end(fiter);
-		AttCase_unassociate(meshSource.analysisCase());
+        m_elemStart = new unsigned int[m_nProcs];
+        m_elemStart[rank] = start[1] - m_nLocalElements;
+        MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, m_elemStart, 1, MPI_UNSIGNED,
+        		MPI_COMM_WORLD);
 
 		// Compute min insphere radius
 		double min = std::numeric_limits<double>::max();
@@ -144,6 +118,76 @@ public:
 		MPI_Reduce((PCU_Comm_Self() == 0 ? MPI_IN_PLACE : &min),
 				&min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
 		logInfo(PCU_Comm_Self()) << "Minimum insphere found:" << min;
+	}
+
+	virtual ~Apf()
+	{
+		apf::destroyGlobalNumbering(m_vertexNum);
+		apf::destroyGlobalNumbering(m_elementNum);
+
+		if (m_boundaryTag)
+			m_mesh->destroyTag(m_boundaryTag);
+		if (m_groupTag)
+			m_mesh->destroyTag(m_groupTag);
+
+		m_mesh->destroyNative();
+		apf::destroyMesh(m_mesh);
+
+		delete [] m_vertStart;
+		delete [] m_elemStart;
+	}
+
+	unsigned int nVertices() const
+	{
+		return m_nVertices;
+	}
+
+	unsigned int nElements() const
+	{
+		return m_nElements;
+	}
+
+	/**
+	 * Number of vertices this process is responsible for
+	 */
+	unsigned int nLocalVertices() const
+	{
+		return m_nLocalVertices;
+	}
+
+	unsigned int nLocalElements() const
+	{
+		return m_nLocalElements;
+	}
+
+	unsigned int vertStart(int rank) const
+	{
+		return m_vertStart[rank];
+	}
+
+	int rankOfVert(unsigned int vertex) const
+	{
+		return std::upper_bound(m_vertStart, m_vertStart+m_nProcs, vertex) - m_vertStart - 1;
+	}
+
+	unsigned int posOfVert(unsigned int vertex) const
+	{
+		return vertex - m_vertStart[rankOfVert(vertex)];
+	}
+
+	unsigned int elemStart(int rank) const
+	{
+		return m_elemStart[rank];
+	}
+
+	int rankOfElem(unsigned int element) const
+	{
+		return std::upper_bound(m_elemStart, m_elemStart+m_nProcs, element) - m_elemStart - 1;
+	}
+
+	unsigned int posOfElem(unsigned int element) const
+	{
+		return element - m_elemStart[rankOfElem(element)];
 	}
 
 	void getVertices(double* vertices)
@@ -187,6 +231,11 @@ public:
 
 	void getGroups(unsigned int* groups)
 	{
+		if (!m_groupTag) {
+			memset(groups, 0, nLocalElements()*sizeof(unsigned int));
+			return;
+		}
+
 		for (unsigned int i = 0; i < nLocalElements(); i++)
 			// TODO get the group from the model region
 			groups[i] = 0;
@@ -194,6 +243,9 @@ public:
 
 	void getBoundaries(unsigned int* boundaries)
 	{
+		if (!m_boundaryTag)
+			return;
+
 		apf::MeshIterator* eiter = m_mesh->begin(3);
 		while (apf::MeshEntity* element = m_mesh->iterate(eiter)) {
 			assert(m_mesh->isOwned(element));
@@ -211,23 +263,15 @@ public:
 					continue;
 
 				int tag;
-				// TODO do not use simmodsuite here
 				m_mesh->getIntTag(adjacent[i], m_boundaryTag, &tag);
-				boundaries[localId*4+SimModSuite::FACE2INTERNAL[i]] = tag;
+				boundaries[localId*4 + FACE2INTERNAL[i]] = tag;
 			}
 		}
 		m_mesh->end(eiter);
 	}
 
 private:
-	/**
-	 * Common initialization for all constructors
-	 */
-	static void _init()
-	{
-		PCU_Comm_Init();
-		PCU_Protect();
-	}
+	static const unsigned int FACE2INTERNAL[];
 };
 
 #endif // INPUT_APF_H

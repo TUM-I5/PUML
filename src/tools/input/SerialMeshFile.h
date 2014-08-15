@@ -17,6 +17,12 @@
 #include <mpi.h>
 #endif // PARALLEL
 
+#include <apfConvert.h>
+#include <apfMDS.h>
+#include <apfMesh2.h>
+#include <gmi_null.h>
+#include <PCU.h>
+
 #include "MeshInput.h"
 
 /**
@@ -35,26 +41,7 @@ private:
 
 	T m_meshReader;
 
-	/** Maximum number of local vertices */
-	unsigned int m_nMaxLocalVertices;
-	/** Maximum number of local elements */
-	unsigned int m_nMaxLocalElements;
-
 public:
-#ifdef PARALLEL
-	SerialMeshFile(MPI_Comm comm = MPI_COMM_WORLD)
-		: m_comm(comm), m_meshReader(comm)
-	{
-		init();
-	}
-#else // PARALLEL
-	SerialMeshFile()
-		: m_nLocalElements(0)
-	{
-		init();
-	}
-#endif // PARALLEL
-
 #ifdef PARALLEL
 	SerialMeshFile(const char* meshFile, MPI_Comm comm = MPI_COMM_WORLD)
 		: m_comm(comm), m_meshReader(comm)
@@ -70,96 +57,6 @@ public:
 	}
 #endif // PARALLEL
 
-	void open(const char* meshFile)
-	{
-		m_meshReader.open(meshFile);
-
-		setNVertices(m_meshReader.nVertices());
-		setNElements(m_meshReader.nElements());
-
-		m_nMaxLocalVertices = (nVertices() + m_nProcs - 1) / m_nProcs;
-		m_nMaxLocalElements = (nElements() + m_nProcs - 1) / m_nProcs;
-		if (m_rank == m_nProcs - 1) {
-			setNLocalVertices(nVertices() - (m_nProcs-1) * m_nMaxLocalVertices);
-			setNLocalElements(nElements() - (m_nProcs-1) * m_nMaxLocalElements);
-		} else {
-			setNLocalVertices(m_nMaxLocalVertices);
-			setNLocalElements(m_nMaxLocalElements);
-		}
-	}
-
-	/**
-	 * @return The rank of this vertex
-	 */
-	int rankOfVert(unsigned int vertex) const
-	{
-		return vertex / m_nMaxLocalVertices;
-	}
-
-	/**
-	 * @return The position of the vertex on the local rank
-	 */
-	unsigned int posOfVert(unsigned int vertex) const
-	{
-		return vertex % m_nMaxLocalVertices;
-	}
-
-	/**
-	 * @return The first element id for process <code>rank</code>
-	 */
-	unsigned int elemStart(int rank) const
-	{
-		return rank * m_nMaxLocalElements;
-	}
-
-	/**
-	 * @return The rank for this element
-	 */
-	int rankOfElem(unsigned int element) const
-	{
-		return element / m_nMaxLocalElements;
-	}
-
-	/**
-	 * @return The position of the element on the local rank
-	 */
-	unsigned int posOfElem(unsigned int element) const
-	{
-		return element % m_nMaxLocalElements;
-	}
-
-	/**
-	 * Get vertices
-	 */
-	void getVertices(double* vertices)
-	{
-		m_meshReader.readVertices(vertices);
-	}
-
-	/**
-	 * Get elements
-	 */
-	void getElements(unsigned int* elements)
-	{
-		m_meshReader.readElements(elements);
-	}
-
-	/**
-	 * Get group information for the elements
-	 */
-	void getGroups(unsigned int* groups)
-	{
-		m_meshReader.readGroups(groups);
-	}
-
-	/**
-	 * Get boundary information
-	 */
-	void getBoundaries(unsigned int* boundaries)
-	{
-		m_meshReader.readBoundaries(boundaries);
-	}
-
 private:
 	/**
 	 * Sets some parameters (called from the constructor)
@@ -173,6 +70,75 @@ private:
 		m_rank = 0;
 		m_nProcs = 1;
 #endif // PARALLEL
+	}
+
+	void open(const char* meshFile)
+	{
+		m_meshReader.open(meshFile);
+
+		unsigned int nVertices = m_meshReader.nVertices();
+		unsigned int nElements = m_meshReader.nElements();
+		unsigned int nLocalVertices = (nVertices + m_nProcs - 1) / m_nProcs;
+		unsigned int nLocalElements = (nElements + m_nProcs - 1) / m_nProcs;
+		if (m_rank == m_nProcs - 1) {
+			nLocalVertices = nVertices - (m_nProcs-1) * nLocalVertices;
+			nLocalElements = nElements - (m_nProcs-1) * nLocalElements;
+		}
+
+		gmi_register_null();
+		gmi_model* model = gmi_load(".null");
+		m_mesh = apf::makeEmptyMdsMesh(model, 3, false);
+
+		// Create elements
+		apf::GlobalToVert vertMap;
+		int* elements = new int[nLocalElements*4];
+		m_meshReader.readElements(elements);
+		apf::construct(m_mesh, elements, nLocalElements, apf::Mesh::TET, vertMap);
+		delete [] elements;
+
+		apf::alignMdsRemotes(m_mesh);
+		apf::deriveMdsModel(m_mesh);
+
+		// Set vertices
+		double* vertices = new double[nLocalVertices*3];
+		m_meshReader.readVertices(vertices);
+		apf::setCoords(m_mesh, vertices, nLocalVertices, vertMap);
+
+		// Set boundaries
+		apf::MeshTag* boundaryTag = m_mesh->createIntTag("boundary condition", 1);
+		int* boundaries = new int[nLocalElements*4];
+		memset(boundaries, 0, nLocalElements*4*sizeof(int));
+		m_meshReader.readBoundaries(boundaries);
+		apf::MeshIterator* it = m_mesh->begin(3);
+		unsigned int i = 0;
+		while (apf::MeshEntity* element = m_mesh->iterate(it)) {
+			apf::Adjacent adjacent;
+			m_mesh->getAdjacent(element, 2, adjacent);
+
+			for (unsigned int j = 0; j < 4; j++) {
+				if (!boundaries[i*4 + j])
+					continue;
+
+				m_mesh->setIntTag(adjacent[j], boundaryTag, &boundaries[i*4 + j]);
+			}
+
+			i++;
+		}
+		m_mesh->end(it);
+		delete [] boundaries;
+
+		// Set groups
+		apf::MeshTag* groupTag = m_mesh->createIntTag("group", 1);
+		int* groups = new int[nLocalElements];
+		m_meshReader.readGroups(groups);
+		it = m_mesh->begin(3);
+		i = 0;
+		while (apf::MeshEntity* element = m_mesh->iterate(it)) {
+			m_mesh->setIntTag(element, groupTag, &groups[i]);
+			i++;
+		}
+		m_mesh->end(it);
+		delete [] groups;
 	}
 };
 

@@ -56,11 +56,7 @@ vars.AddVariables(
   ( 'mpiLib', 'MPI library against this is linked (only required for simModSuite)',
                 'mpich2',
                 None, None
-              ),
-                  
-   BoolVariable( 'apf', 'compile with Scorecs APF library',
-                 False
-               )
+              )
 )
 
 env.Tool('PrefixPathTool')
@@ -186,19 +182,17 @@ env.tools.Append(CPPPATH=['#/submodules'])
 #env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
 env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
-# ParMETIS
+# (Par)METIS
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
-# APF
-if env['apf']:
-    env.tools.Tool('ApfTool', required=True)
-    env.tools.Append(CPPDEFINES=['USE_APF'])
-    if not env['simModSuite']:
-        print 'APF requires Simmetrix Simulation Modeling Suite, automatically selecting it' 
-        env['simModSuite'] = True
-# SimModSuite
-if env['simModSuite']:
-    env.tools.Tool('SimModSuiteTool', mpiLib=env['mpiLib'], required=True)
-    env.tools.Append(CPPDEFINES=['USE_SIMMOD'])
+
+if env['parallelization'] in ['mpi']:
+    # APF
+    env.tools.Tool('ApfTool', required=True, sim=env['simModSuite'])
+        
+    # SimModSuite
+    if env['simModSuite']:
+        env.tools.Tool('SimModSuiteTool', mpiLib=env['mpiLib'], required=True)
+        env.tools.Append(CPPDEFINES=['USE_SIMMOD'])
 
 # get the source files
 env.sourceFiles = {}
@@ -212,35 +206,38 @@ Import('env')
 env.StaticLibrary('#/'+env['libFile'], env.sourceFiles['lib'])
 
 # build tools
-env.tools.Program('#/'+env['execDir']+'/pumgen', env.sourceFiles['pumgen'])
+if env['parallelization'] in ['mpi']:
+    env.tools.Program('#/'+env['execDir']+'/pumgen', env.sourceFiles['pumgen'])
 
 # build unit tests
 if env['unitTests'] != 'none':
-  # Some MPI version requires this flag
-  if env['parallelization'] == 'mpi':
-    env.Append(CPPDEFINES=['MPICH_IGNORE_CXX_SEEK'])
+    
 
-  # define location of cxxtest
-  env['CXXTEST'] = 'submodules/cxxtest'
+    # Some MPI version requires this flag
+    if env['parallelization'] == 'mpi':
+        env.Append(CPPDEFINES=['MPICH_IGNORE_CXX_SEEK'])
+
+    # define location of cxxtest
+    env['CXXTEST'] = 'submodules/cxxtest'
  
-  # Continue testing if tests fail
-  env['CXXTEST_SKIP_ERRORS'] = True
+    # Continue testing if tests fail
+    env['CXXTEST_SKIP_ERRORS'] = True
   
-  # Parallel tests?
-  if env['parallelization'] in ['mpi']:
-      env['CXXTEST_COMMAND'] = 'mpiexec -np 2 %t'
-      env['CXXTEST_OPTS'] = ['--main=cxxtest_main']
+    # Parallel tests?
+    if env['parallelization'] in ['mpi']:
+        env['CXXTEST_COMMAND'] = 'mpiexec -np 2 %t'
+        env['CXXTEST_OPTS'] = ['--main=cxxtest_main']
   
-  # add cxxtest-tool
-  env.Tool('cxxtest', toolpath=[env['CXXTEST']+'/build_tools/SCons'])
+    # add cxxtest-tool
+    env.Tool('cxxtest', toolpath=[env['CXXTEST']+'/build_tools/SCons'])
    
-  # Get test source files
-  env.sourceFiles['tests'] = []
+    # Get test source files
+    env.sourceFiles['tests'] = []
   
-  Export('env')
-  SConscript('tests/SConscript', variant_dir='#/'+env['buildDir']+'/tests', src_dir='#/')
-  Import('env')
+    Export('env')
+    SConscript('tests/SConscript', variant_dir='#/'+env['buildDir']+'/tests', src_dir='#/')
+    Import('env')
 
-  # build unit tests
-  env.CxxTest(target='#/'+env['buildDir']+'/tests/cxxtest_runner',
-              source=env.sourceFiles['lib']+env.sourceFiles['tests'])
+    # build unit tests
+    env.CxxTest(target='#/'+env['buildDir']+'/tests/cxxtest_runner',
+                source=env.sourceFiles['lib']+env.sourceFiles['tests'])

@@ -19,20 +19,24 @@ def generate(env, **kw):
     else:
         required = False
         
-    if not conf.CheckLibWithHeader('gmi_sim', 'apf.h', 'c++'):
-        if required:
-            print 'Could not find APF!'
-            env.Exit(1)
-        else:
-            conf.Finish()
-            return
+    if 'sim' in kw:
+        sim = kw['sim']
+    else:
+        sim = False
         
-    # Additional libs
-    libs = ['gmi', 'ma', 'mds', 'apf_sim', 'apf', 'pcu']
-    for l in libs:
-        if not conf.CheckLib(l):
+    # Libs required to couple SimModSuite
+    simLibs = [('gmi_sim', 'gmi_sim.h'), ('apf_sim', 'apfSIM.h')]
+    # Other APF libs
+    libs = [('gmi', 'gmi.h'), ('mds', 'apfMDS.h'), ('ma', 'ma.h'),
+            ('apf', 'apf.h'), ('pcu', 'PCU.h')]
+    
+    if sim:
+        libs = simLibs + libs
+        
+    for lib in libs:
+        if not conf.CheckLibWithHeader(lib[0], lib[1], 'c++'):
             if required:
-                print 'Could not find APF. ' + l + ' is missing!'
+                print 'Could not find APF!'
                 env.Exit(1)
             
     conf.Finish()

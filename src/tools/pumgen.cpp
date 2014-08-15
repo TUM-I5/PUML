@@ -10,9 +10,7 @@
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  */
 
-#ifdef PARALLEL
 #include <mpi.h>
-#endif // PARALLEL
 
 #include <algorithm>
 #include <cstring>
@@ -23,29 +21,17 @@
 #include "utils/args.h"
 #include "utils/logger.h"
 
-#ifdef PARALLEL
 #include <parmetis.h>
-#else // PARALLEL
-#include <metis.h>
-#endif // PARALLEL
 
-#ifdef PARALLEL
 #include <netcdf_par.h>
-#endif // PARALLEL
 #include <netcdf.h>
 
-#include "input/SerialMeshFile.h"
-#ifdef PARALLEL
-#include "meshreader/ParallelGambitReader.h"
-#else // PARALLEL
-#include "meshreader/GambitReader.h"
-#endif // PARALLEL
-#ifdef USE_APF
 #include "input/Apf.h"
-#endif // USE_APF
+#include "input/SerialMeshFile.h"
 #ifdef USE_SIMMOD
 #include "input/SimModSuite.h"
 #endif // USE_SIMMOD
+#include "meshreader/ParallelGambitReader.h"
 
 struct Element {
 	/** Global id */
@@ -158,7 +144,6 @@ int main(int argc, char* argv[])
 	int rank = 0;
 	int processes = 1;
 
-#ifdef PARALLEL
 	int threadSupport;
 	MPI_Init_thread(&argc, &argv, MPI_THREAD_SINGLE, &threadSupport);
 
@@ -168,23 +153,24 @@ int main(int argc, char* argv[])
 
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &processes);
-#endif // PARALLEL
+
+	PCU_Comm_Init();
 
 	// Parse command line arguments
 	utils::Args args;
-	const char* source[] = {"gambit", "simmodsuite", "apf"};
+	const char* source[] = {"gambit", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
-	args.addOption("license", 'l', "License file (only used by SimModSuite and APF)",
+	args.addOption("license", 'l', "License file (only used by SimModSuite)",
 			utils::Args::Required, false);
-	args.addOption("model", 'm', "Model file (only used by SimModSuite and APF)",
+	args.addOption("cad", 'c', "CAD file (only used by SimModSuite)",
 			utils::Args::Required, false);
-	args.addOption("mesh", 0, "Mesh attributes name (only used by SimModSuite APF, default: \"mesh\")",
+	args.addOption("mesh", 0, "Mesh attributes name (only used by SimModSuite, default: \"mesh\")",
 			utils::Args::Required, false);
-	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite and APF, default: \"analysis\")",
+	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
 			utils::Args::Required, false);
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
-	args.addAdditionalOption("input", "Input file (mesh or CAD)");
+	args.addAdditionalOption("input", "Input file (mesh or model)");
 	args.addAdditionalOption("partition", "Number of partitions");
 	args.addAdditionalOption("output", "Output parallel unstructured mesh file", false);
 
@@ -212,22 +198,18 @@ int main(int argc, char* argv[])
 		outputFile.append(".nc.pum");
 	}
 
-	MeshInput* mesh = 0L;
+	MeshInput* meshInput = 0L;
 	switch (args.getArgument<int>("source", 0)) {
 	case 0:
 		logInfo(rank) << "Using Gambit mesh";
-#ifdef PARALLEL
-		mesh = new SerialMeshFile<ParallelGambitReader>(inputFile);
-#else // PARALLEL
-		mesh = new SerialMeshFile<GambitReader>(inputFile);
-#endif // PARALLEL
+		meshInput = new SerialMeshFile<ParallelGambitReader>(inputFile);
 		break;
 	case 1:
 #ifdef USE_SIMMOD
 		logInfo(rank) << "Using SimModSuite";
 
-		mesh = new SimModSuite(inputFile,
-				args.getArgument<const char*>("model", 0L),
+		meshInput = new SimModSuite(inputFile,
+				args.getArgument<const char*>("cad", 0L),
 				args.getArgument<const char*>("license", 0L),
 				args.getArgument<const char*>("mesh", "mesh"),
 				args.getArgument<const char*>("analysis", "analysis"),
@@ -237,39 +219,17 @@ int main(int argc, char* argv[])
 		logError() << "SimModSuite is not supported in this version";
 #endif // USE_SIMMOD
 		break;
-	case 2:
-#ifdef USE_APF
-		logInfo(rank) << "Using APF";
-
-		{
-		SimModSuite* meshSource = new SimModSuite(inputFile,
-				args.getArgument<const char*>("model", 0L),
-				args.getArgument<const char*>("license", 0L),
-				args.getArgument<const char*>("mesh", "mesh"),
-				args.getArgument<const char*>("analysis", "analysis"),
-				args.getArgument<int>("enforce-size", 0));
-
-		mesh = new Apf(*meshSource);
-
-		delete meshSource;
-		}
-
-#else // USE_APF
-		logError() << "APF is not supported in this version";
-#endif // USE_APF
-		break;
 	default:
 		logError() << "Unknown source";
 	}
 
+	Apf* mesh = new Apf(meshInput->getMesh());
+	delete meshInput;
+
 	// Read elements
 	// TODO only tetrahedral meshes are currently supported
 	unsigned int* elements;
-#ifdef PARALLEL
 	MPI_Alloc_mem(mesh->nLocalElements()*4*sizeof(unsigned int), MPI_INFO_NULL, &elements);
-#else // PARALLEL
-	elements = new unsigned int[mesh.nLocalElements()*4];
-#endif // PARALLEL
 	mesh->getElements(elements);
 
 	// TODO wrap this code part so we can switch to different libraries
@@ -292,14 +252,8 @@ int main(int argc, char* argv[])
 
 	idx_t* xadj;
 	idx_t* adjncy;
-#ifdef PARALLEL
 	MPI_Comm commWorld = MPI_COMM_WORLD;
 	if (ParMETIS_V3_Mesh2Dual(elemDist, eptr, eind, &numflag, &ncommonnodes, &xadj, &adjncy, &commWorld) != METIS_OK)
-#else // PARALLEL
-    idx_t ne = nElements;
-	idx_t nn = nVertices;
-    if (METIS_MeshToDual(&ne, &nn, eptr, eind, &ncommonnodes, &numflag, &xadj, &adjncy) != METIS_OK)
-#endif // PARALLEL
 		logError() << "Could not create dual graph";
 
 	delete [] eptr;
@@ -337,12 +291,8 @@ int main(int argc, char* argv[])
 	idx_t edgecut;
 	idx_t* part = new idx_t[mesh->nLocalElements()];
 
-#ifdef PARALLEL
 	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, 0L, 0L, &wgtflag, &numflag, &ncon,
 			&nparts, tpwgts, &ubev, options, &edgecut, part, &commWorld) != METIS_OK)
-#else // PARALLEL
-	// TODO
-#endif // PARALLEL
 		logError() << "Could create partitions";
 
 #if 0
@@ -370,10 +320,8 @@ int main(int argc, char* argv[])
 	logInfo(rank) << "Redistributing elements";
 	unsigned int nMaxLocalPart = (nPartitions + processes - 1) / processes;
 	unsigned int nLocalPart = nMaxLocalPart;
-#ifdef PARALLEL
 	if (rank == processes - 1)
 		nLocalPart = nPartitions - (processes-1) * nMaxLocalPart;
-#endif // PARALLEL
 
 	// Redistribute the elements among the processors according to there partitions
 	// Count number local elements in each partition
@@ -384,7 +332,6 @@ int main(int argc, char* argv[])
 
 	unsigned int pos;	// Helper variable
 
-#ifdef PARALLEL
 	std::vector<unsigned int>* elementPerPart = new std::vector<unsigned int>[nPartitions];
 	for (unsigned int i = 0; i < mesh->nLocalElements(); i++)
 		elementPerPart[part[i]].push_back(i);
@@ -519,23 +466,11 @@ int main(int argc, char* argv[])
 
 	delete [] recvElements;
 	delete [] recvSize;
-#else // PARALLEL
-	for (unsigned int i = 0; i < nLocalElements; i++)
-		localPartSize[part[i]]++;
-	localSize = nLocalElements;
-
-	localPartElements = new Element[localSize];
-	// TODO fill localPartElements
-#endif // PARALLEL
 
 	// Save the partition information because other processes still need it
 	// But copy it to an unsigned int
 	unsigned int* elementPart;
-#ifdef PARALLEL
 	MPI_Alloc_mem(mesh->nLocalElements()*sizeof(unsigned int), MPI_INFO_NULL, &elementPart);
-#else // PARALLEL
-	elementPart = new unsigned int[mesh.nLocalElements()];
-#endif // PARALLEL
 	for (unsigned int i = 0; i < mesh->nLocalElements(); i++)
 		elementPart[i] = part[i];
 
@@ -547,7 +482,6 @@ int main(int argc, char* argv[])
 				&localPartElements[localPartPtr[i]]+localPartPtr[i+1]-localPartPtr[i]);
 
 	logInfo(rank) << "Computing element data";
-#ifdef PARALLEL
 	// Create MPI window to allow access to all elements
 	MPI_Win elementWindow;
 	MPI_Win_create(elements, mesh->nLocalElements()*4*sizeof(unsigned int),
@@ -557,7 +491,6 @@ int main(int argc, char* argv[])
 	MPI_Win elementPartWindow;
 	MPI_Win_create(elementPart, mesh->nLocalElements()*sizeof(unsigned int),
 			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementPartWindow);
-#endif // PARALLEL
 
 	// Create map from local elements to ids inside their partition
 	std::map<unsigned int, unsigned int> globalElem2PartId;
@@ -597,7 +530,6 @@ int main(int argc, char* argv[])
 
 			// Check whether we are in the same partition
 			unsigned int neighborPart;
-#ifdef PARALLEL
 			MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfElem(localPartElements[i].neighbors[j]),
 					MPI_MODE_NOCHECK, elementPartWindow);
 			MPI_Get(&neighborPart, 1, MPI_UNSIGNED,
@@ -605,12 +537,8 @@ int main(int argc, char* argv[])
 					mesh->posOfElem(localPartElements[i].neighbors[j]),
 					1, MPI_UNSIGNED, elementPartWindow);
 			MPI_Win_unlock(mesh->rankOfElem(localPartElements[i].neighbors[j]), elementPartWindow);
-#else // PARALLEL
-			// TODO
-#endif // PARALLEL
 
 			unsigned int neighborVertices[4];
-#ifdef PARALLEL
 			MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfElem(localPartElements[i].neighbors[j]),
 					MPI_MODE_NOCHECK, elementWindow);
 			MPI_Get(neighborVertices, 4, MPI_UNSIGNED,
@@ -618,9 +546,6 @@ int main(int argc, char* argv[])
 					mesh->posOfElem(localPartElements[i].neighbors[j]) * 4,
 					4, MPI_UNSIGNED, elementWindow);
 			MPI_Win_unlock(mesh->rankOfElem(localPartElements[i].neighbors[j]), elementWindow);
-#else // PARALLEL
-			// TODO
-#endif // PARALLEL
 
 			int mask;
 			findAllBit(neighborVertices, neighborVertices+4, localPartElements[i].vertex, localPartElements[i].vertex+4, &mask);
@@ -709,27 +634,21 @@ int main(int argc, char* argv[])
 	for (unsigned int i = 1; i < nLocalPart; i++)
 		if (maxPartSize < localPartPtr[i+1]-localPartPtr[i])
 			maxPartSize = localPartPtr[i+1]-localPartPtr[i];
-#ifdef PARALLEL
 	MPI_Allreduce(MPI_IN_PLACE, &maxPartSize, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-#endif // PARALLEL
 
 	// Compute max number of vertices in a partition
 	unsigned int maxVertices = localPartVertexSize[0];
 	for (unsigned int i = 1; i < nLocalPart; i++)
 		if (maxVertices < localPartVertexSize[i])
 			maxVertices = localPartVertexSize[i];
-#ifdef PARALLEL
 	MPI_Allreduce(MPI_IN_PLACE, &maxVertices, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-#endif // PARALLEL
 
 	// Compute max number of boundaries per partition
 	unsigned int maxBoundaries = boundaryMaps[0].size();
 	for (unsigned int i = 1; i < nLocalPart; i++)
 		if (maxBoundaries < boundaryMaps[i].size())
 			maxBoundaries = boundaryMaps[i].size();
-#ifdef PARALLEL
 	MPI_Allreduce(MPI_IN_PLACE, &maxBoundaries, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-#endif // PARALLEL
 
 	// Compute max boundary size
 	unsigned int maxBoundarySize = 0;
@@ -740,9 +659,7 @@ int main(int argc, char* argv[])
 				maxBoundarySize = j->second.size();
 
 	}
-#ifdef PARALLEL
 	MPI_Allreduce(MPI_IN_PLACE, &maxBoundarySize, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-#endif // PARALLEL
 
 	// Create element vertex buffer
 	unsigned int* localPartElemVrtx = new unsigned int[localPartPtr[nLocalPart]*4];
@@ -757,11 +674,7 @@ int main(int argc, char* argv[])
 	logInfo(rank) << "Creating netCDF file";
 	// TODO create netCDF file with a new PUML format
 	int ncFile;
-#ifdef PARALLEL
 	checkNcError(nc_create_par(outputFile.c_str(), NC_NETCDF4 | NC_MPIIO, MPI_COMM_WORLD, MPI_INFO_NULL, &ncFile));
-#else // PARALLEL
-	checkNcError(nc_create(outputFile.c_str(), NC_NETCDF4, &ncFile));
-#endif
 
 	// Create netcdf dimensions
 	int ncDimDimension;
@@ -878,33 +791,22 @@ int main(int argc, char* argv[])
 	delete [] localPartElemMPI;
 	delete [] localPartElemGroup;
 
-#ifdef PARALLEL
 	MPI_Win_free(&elementWindow);
 	MPI_Win_free(&elementPartWindow);
 	MPI_Free_mem(elements);
 	MPI_Free_mem(elementPart);
-#else // PARALLEL
-	delete [] elements;
-	delete [] elementPart;
-#endif // PARALLEL
 	delete [] localPartPtr;
 	delete [] localPartElements;
 
 	// Load vertices
 	double* vertices;
-#ifdef PARALLEL
 	MPI_Alloc_mem(mesh->nLocalVertices()*3*sizeof(double), MPI_INFO_NULL, &vertices);
-#else // PARALLEL
-	vertices = new double[mesh.nLocalVertices() * 3];
-#endif // PARALLEL
 	mesh->getVertices(vertices);
 
-#ifdef PARALLEL
 	// Create MPI window to get access to all vertices
 	MPI_Win verticesWindow;
 	MPI_Win_create(vertices, mesh->nLocalVertices()*3*sizeof(double),
 			sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &verticesWindow);
-#endif // PARALLEL
 
 	logInfo(rank) << "Writing vertices data";
 	double* localVertices = new double[maxVertices*3];
@@ -922,15 +824,11 @@ int main(int argc, char* argv[])
 					continue;
 
 				// Get the vertices
-#ifdef PARALLEL
 				MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
 				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
 						mesh->rankOfVert(j->first), mesh->posOfVert(j->first)*3, 3, MPI_DOUBLE,
 						verticesWindow);
 				MPI_Win_unlock(mesh->rankOfVert(j->first), verticesWindow);
-#else // PARALLEL
-				// TODO
-#endif // PARALLEL
 				localVerticesTransfered[j->second] = true;
 			}
 		}
@@ -952,12 +850,8 @@ int main(int argc, char* argv[])
 	delete [] localVertices;
 	delete [] localVerticesTransfered;
 
-#ifdef PARALLEL
 	MPI_Win_free(&verticesWindow);
 	MPI_Free_mem(vertices);
-#else // PARALLEL
-	delete [] vertices;
-#endif // PARALLEL
 	delete [] localPartVerticesMaps;
 	delete [] localPartVertexSize;
 
@@ -976,9 +870,7 @@ int main(int argc, char* argv[])
 	for (unsigned int i = 0; i < nLocalPart; i++) {
 		maxBoundaries += boundaryMaps[i].size();
 	}
-#ifdef PARALLEL
 	MPI_Allreduce(MPI_IN_PLACE, &maxBoundaries, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-#endif // PARALLEL
 
 	unsigned int* localBoundaryIds = new unsigned int[maxBoundarySize];
 	unsigned int boundariesDone = 0;
@@ -1032,8 +924,8 @@ int main(int argc, char* argv[])
 
 	logInfo(rank) << "Finished successfully";
 
-#ifdef PARALLEL
+	PCU_Comm_Free();
+
 	MPI_Finalize();
-#endif // PARALLEL
 	return 0;
 }

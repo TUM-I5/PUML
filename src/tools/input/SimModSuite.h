@@ -19,6 +19,12 @@
 #include <cassert>
 #include <cstring>
 
+#include <apf.h>
+#include <apfMDS.h>
+#include <apfMesh2.h>
+#include <apfSIM.h>
+#include <gmi_sim.h>
+
 #include <SimParasolidKrnl.h>
 #include <MeshSim.h>
 #include <SimPartitionedMesh.h>
@@ -29,7 +35,7 @@
 #include "utils/logger.h"
 #include "utils/progress.h"
 
-#include "MeshGenerator.h"
+#include "MeshInput.h"
 #include "SimModelerUtil.h"
 
 //forward declare
@@ -40,71 +46,48 @@ pAManager SModel_attManager(pModel model);
  *  of this class
  * @todo Maybe add MS_setMaxEntities to limit the number of elements
  */
-class SimModSuite : public MeshGenerator
+class SimModSuite : public MeshInput
 {
 private:
 	pGModel m_model;
 
-	pAManager m_attMngr;
+	pParMesh m_simMesh;
 
-	pACase m_meshCase;
-	pACase m_analysisCase;
-
-	pParMesh m_mesh;
-	pMesh m_localMesh;
-
-	/** True of the mesh is already generated */
-	bool m_isGenerated;
+	/** Enable Simmetrix logging file */
+	bool m_log;
 
 public:
-	SimModSuite(const char* licenseFile = 0L)
-		: m_model(0L), m_isGenerated(false)
-	{
-		_init(licenseFile);
-	}
-
-	SimModSuite(const char* cadFile, const char* modFile = 0L,
+	SimModSuite(const char* modFile, const char* cadFile = 0L,
 			const char* licenseFile = 0L,
 			const char* meshCaseName = "mesh",
 			const char* analysisCaseName = "analysis",
-			int enforceSize = 0)
-		: m_model(0L), m_isGenerated(false)
+			int enforceSize = 0,
+			const char* logFile = 0L)
 	{
-
-		_init(licenseFile);
-
-		generate(cadFile, modFile, meshCaseName, analysisCaseName, enforceSize);
-	}
-
-	virtual ~SimModSuite()
-	{
-		if (m_model) {
-			// TODO delete mesh, model, etc
-		}
-
-		SimParasolid_stop(1);
-
-		MS_exit();
-		Sim_unregisterAllKeys();
-
-		SimPartitionedMesh_stop();
-	}
-
-	void generate(const char* cadFile, const char* modFile,
-			const char* meshCaseName = "mesh", const char* analysisCaseName = "analysis",
-			int forceSize = 0)
-	{
-		logInfo(PMU_rank()) << "Loading model";
-		pNativeModel nativeModel = ParasolidNM_createFromFile(cadFile, 0);
-
-		std::string modelFile;
-		if (modFile == 0L) {
-			modelFile = cadFile;
-			utils::StringUtils::replace(modelFile, "_nat.x_t", ".smd");
+		// Init SimModSuite
+		if (logFile) {
+			m_log = true;
+			Sim_logOn(logFile);
 		} else
-			modelFile = modFile;
+			m_log = false;
+		SimPartitionedMesh_start(0L, 0L);
+		Sim_readLicenseFile(licenseFile);
+		MS_init();
+		SimParasolid_start(1);
+		Sim_setMessageHandler(messageHandler);
 
-		m_model = GM_load(modelFile.c_str(), nativeModel, 0L);
+		// Load CAD
+		logInfo(PMU_rank()) << "Loading model";
+		std::string sCadFile;
+		if (cadFile)
+			sCadFile = cadFile;
+		else {
+			sCadFile = modFile;
+			utils::StringUtils::replaceLast(sCadFile, ".smd", "_nat.x_t");
+		}
+		pNativeModel nativeModel = ParasolidNM_createFromFile(sCadFile.c_str(), 0);
+
+		m_model = GM_load(modFile, nativeModel, 0L);
 		NM_release(nativeModel);
 
         // check for model errors
@@ -114,35 +97,36 @@ public:
                 logError() << "Input model is not valid";
         PList_delete(modelErrors);
 
-		m_attMngr = SModel_attManager(m_model);
-
+        // Extract cases
 		logInfo(PMU_rank()) << "Extracting cases";
+        pAManager attMngr = SModel_attManager(m_model);
 
 		MeshingOptions meshingOptions;
-		m_meshCase = MS_newMeshCase(m_model);
-		MS_setupSimModelerMeshCase(extractCase(meshCaseName), m_meshCase, &meshingOptions);
+		pACase meshCase = MS_newMeshCase(m_model);
+		MS_setupSimModelerMeshCase(extractCase(attMngr, meshCaseName),
+				meshCase, &meshingOptions);
 
-		m_analysisCase = extractCase(analysisCaseName);
-		pPList children = AttNode_children(m_analysisCase);
+		pACase analysisCase = extractCase(attMngr, analysisCaseName);
+		pPList children = AttNode_children(analysisCase);
 		void* iter = 0L;
 		while (pANode child = static_cast<pANode>(PList_next(children, &iter)))
 			AttCase_setModel(static_cast<pACase>(child), m_model);
 		PList_delete(children);
 
         // create the mesh
-        m_mesh = PM_new(0, m_model, PMU_size());
+		m_simMesh = PM_new(0, m_model, PMU_size());
 
         pProgress prog = Progress_new();
         Progress_setCallback(prog, progressHandler);
 
         logInfo(PMU_rank()) << "Starting the surface mesher";
-        pSurfaceMesher surfaceMesher = SurfaceMesher_new(m_meshCase, m_mesh);
+        pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
         progressBar.setTotal(26);
         SurfaceMesher_execute(surfaceMesher, prog);
 
         logInfo(PMU_rank()) << "Starting the volume mesher";
-        pVolumeMesher volumeMesher = VolumeMesher_new(m_meshCase, m_mesh);
-        VolumeMesher_setEnforceSize(volumeMesher, forceSize);
+        pVolumeMesher volumeMesher = VolumeMesher_new(meshCase, m_simMesh);
+        VolumeMesher_setEnforceSize(volumeMesher, enforceSize);
         progressBar.setTotal(6);
         VolumeMesher_execute(volumeMesher, prog);
 
@@ -152,155 +136,64 @@ public:
 
         Progress_delete(prog);
 
-        // Get basic mesh information
+        // Convert to APF mesh
+		apf::Mesh* tmpMesh = apf::createMesh(m_simMesh);
+		gmi_register_sim();
+		gmi_model* model = gmi_import_sim(m_model);
 
-        // Double check if PM_setEntityIds gives the correct ordering
-        // Compile without NDEBUG and getElements() and getVertices() will through errors
-        int size[4];
-        PM_setEntityIds(m_mesh, 1, 1, sthreadDefault, size);
-        setNVertices(size[0]);
-        PM_setEntityIds(m_mesh, 8, 0, sthreadDefault, size);
-        setNElements(size[3]);
+		logInfo(PMU_rank()) << "Converting mesh to APF";
+		m_mesh = apf::createMdsMesh(model, tmpMesh);
+		apf::destroyMesh(tmpMesh);
 
-        logInfo(PMU_rank()) << "Mesh with" << nElements() << "elements generated";
-
-        // Count slave vertices
-        unsigned int numSlaveVertices = 0;
-        for (int i = 0; i < PMU_size(); i++) {
-        	if (i == PMU_rank())
-        		continue;
-
-        	numSlaveVertices += PM_numBdryEntSlave(m_mesh, 0, 0, i);
-        }
-
-        m_localMesh = PM_mesh(m_mesh, 0);
-
-        setNLocalVertices(M_numVertices(m_localMesh) - numSlaveVertices);
-        setNLocalElements(M_numRegions(m_localMesh));
-
-        init();
-
-        m_isGenerated = true;
-	}
-
-	bool isGenerated() const
-	{
-		return m_isGenerated;
-	}
-
-	void getVertices(double* vertices)
-	{
-        VIter viter = M_vertexIter(m_localMesh);
-        while (pVertex v = VIter_next(viter)) {
-        	if (!EN_isOwnerProc(v))
-        		continue;
-
-        	int localId = EN_id(v) - vertStart(PMU_rank());
-        	assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalVertices());
-
-        	V_coord(v, &vertices[localId*3]);
-        }
-        VIter_delete(viter);
-	}
-
-	void getElements(unsigned int* elements)
-	{
-		RIter riter = M_regionIter(m_localMesh);
-		for (unsigned int i = 0; i < nLocalElements(); i++) {
-			pRegion r = RIter_next(riter);
-			assert(r);
-
-			int localId = EN_id(r) - elemStart(PMU_rank());
-			assert(localId >= 0 && static_cast<unsigned int>(localId) < nLocalElements());
-
-			pPList vertices = R_vertices(r, 1); // 1 should be the correct ordering ...
-			// TODO assuming tetrahedra
-			for (unsigned int j = 0; j < 4; j++)
-				elements[localId*4+j] = EN_id(static_cast<pVertex>(PList_item(vertices, j)));
-			PList_delete(vertices);
-		}
-		RIter_delete(riter);
-	}
-
-	void getGroups(unsigned int* groups)
-	{
-		for (unsigned int i = 0; i < nLocalElements(); i++)
-			// TODO get the group from the model region
-			groups[i] = 0;
-	}
-
-	void getBoundaries(unsigned int* boundaries)
-	{
-		AttCase_associate(m_analysisCase, 0L);
-
-		FIter fiter = M_faceIter(m_localMesh);
-		while (pFace face = FIter_next(fiter)) {
-			if (F_whatInType(face) != Gface)
+		// Set the boundary conditions from the geometric model
+		AttCase_associate(analysisCase, 0L);
+		apf::MeshTag* boundaryTag = m_mesh->createIntTag("boundary condition", 1);
+		apf::MeshIterator* it = m_mesh->begin(2);
+		while (apf::MeshEntity* face = m_mesh->iterate(it)) {
+			apf::ModelEntity* modelFace = m_mesh->toModel(face);
+			if (m_mesh->getModelType(modelFace) != 2)
 				continue;
 
-			pGFace modelFace = static_cast<pGFace>(F_whatIn(face));
-			pAttribute attr = GEN_attrib(modelFace, "boundaryCondition");
+			pGEntity simFace = reinterpret_cast<pGEntity>(modelFace);
+
+			pAttribute attr = GEN_attrib(simFace, "boundaryCondition");
 			if (attr) {
 				char* image = Attribute_imageClass(attr);
-				unsigned int boundary = parseBoundary(image);
+				int boundary = parseBoundary(image);
 				Sim_deleteString(image);
 
-				for (int i = 0; i <= 1; i++) {
-					// Set boundary for both sides
-
-					pRegion r = F_region(face, i);
-					if (!r)
-						continue;
-
-					for (unsigned int j = 0; j < 4; j++) {
-						pFace f = R_face(r, j);
-
-						if (f == face) {
-							int localId = EN_id(r) - elemStart(PMU_rank());
-							assert(localId >= 0
-									&& static_cast<unsigned int>(localId) < nLocalElements());
-
-							boundaries[localId*4 + FACE2INTERNAL[j]] = boundary;
-
-							break;
-						}
-					}
-				}
+				m_mesh->setIntTag(face, boundaryTag, &boundary);
 			}
+
 		}
-		FIter_delete(fiter);
+		m_mesh->end(it);
+		AttCase_unassociate(analysisCase);
 
-		AttCase_unassociate(m_analysisCase);
+		// Delete cases
+		MS_deleteMeshCase(meshCase);
+		MS_deleteMeshCase(analysisCase);
 	}
 
-	/**
-	 * Provides direct access to the SimModSuite model. Should be used with caution.
-	 */
-	pGModel model()
+	virtual ~SimModSuite()
 	{
-		return m_model;
-	}
+		M_release(m_simMesh);
+		// TODO we can delete the model here because it is still
+		// connected to the mesh
+		//GM_release(m_model);
 
-	/**
-	 * Provides direct access to the SimModSuite mesh. Should be used with caution.
-	 */
-	pParMesh mesh()
-	{
-		return m_mesh;
-	}
-
-	/**
-	 * Provides direct access to the SimModSuite analysis case. Should be used with caution.
-	 */
-	pACase analysisCase()
-	{
-		return m_analysisCase;
+		// Finalize SimModSuite
+		SimParasolid_stop(1);
+		MS_exit();
+		Sim_unregisterAllKeys();
+		SimPartitionedMesh_stop();
+		if (m_log)
+			Sim_logOff();
 	}
 
 private:
-	pACase extractCase(const char* name)
+	pACase extractCase(pAManager attMngr, const char* name)
 	{
-		pACase acase = AMAN_findCase(m_attMngr, name);
+		pACase acase = AMAN_findCase(attMngr, name);
 		if (!acase)
 			logError() << "Case" << std::string(name) << "not found.";
 
@@ -309,7 +202,8 @@ private:
 		return acase;
 	}
 
-public:
+private:
+
 	/**
 	 * @todo Make this private as soon as APF does no longer need it
 	 */
@@ -324,17 +218,6 @@ public:
 
 		logError() << "Unknown boundary condition" << boundaryCondition;
 		return -1;
-	}
-
-private:
-	static void _init(const char* licenseFile)
-	{
-		SimPartitionedMesh_start(0L, 0L);
-		Sim_readLicenseFile(licenseFile);
-		MS_init();
-		SimParasolid_start(1);
-
-		Sim_setMessageHandler(messageHandler);
 	}
 
 	static void messageHandler(int type, const char* msg)
@@ -379,9 +262,6 @@ private:
 
 		logDebug() << what << level << startVal << endVal << currentVal;
 	}
-
-public:
-	static const unsigned int FACE2INTERNAL[];
 
 private:
 	static utils::Progress progressBar;

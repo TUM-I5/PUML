@@ -29,7 +29,7 @@ struct ElementGroup
 	/** The element */
 	unsigned int element;
 	/** The group for this element */
-	unsigned int group;
+	int group;
 };
 
 /**
@@ -42,7 +42,7 @@ struct BoundaryFace
 	/** The face of the element */
 	unsigned int face;
 	/** The type of the boundary */
-	unsigned int type;
+	int type;
 };
 
 class GambitReader
@@ -371,7 +371,7 @@ public:
 	 * @todo Only tetrahedral meshes are supported
 	 * @todo Support for varying coordinate/vertexid fields
 	 */
-	void readElements(unsigned int start, unsigned int count, unsigned int* elements)
+	void readElements(unsigned int start, unsigned int count, int* elements)
 	{
 		m_mesh.clear();
 
@@ -399,7 +399,7 @@ public:
 	 *
 	 * @see readElements(unsigned int, unsigned int, unsinged int*)
 	 */
-	void readElements(unsigned int* elements)
+	void readElements(int* elements)
 	{
 		logInfo() << "Reading elements";
 		readElements(0, nElements(), elements);
@@ -455,7 +455,7 @@ public:
 	 * In contrast to readGroups(unsigned int, unsigned int, ElementGroup*) it
 	 * returns the group numbers sorted according to the elements.
 	 */
-	void readGroups(unsigned int* groups)
+	void readGroups(int* groups)
 	{
 		logInfo() << "Reading group information";
 
@@ -537,7 +537,7 @@ public:
 			}
 
 			boundaries[i].element--;
-			boundaries[i].face = face2internal(boundaries[i].face);
+			boundaries[i].face--;
 			boundaries[i].type = section->type;
 
 			start++; // Line in the current section
@@ -555,7 +555,7 @@ public:
 	 *
 	 * @todo Only tetrahedral meshes are supported
 	 */
-	void readBoundaries(unsigned int* boundaries)
+	void readBoundaries(int* boundaries)
 	{
 		logInfo() << "Reading boundary conditions";
 
@@ -570,24 +570,6 @@ public:
 	}
 
 private:
-	/**
-	 * Convert the gambit face number to the internal face number
-	 */
-	static unsigned int face2internal(unsigned int face)
-	{
-		switch (face) {
-		case 1:
-		case 2:
-			return face-1;
-		case 3:
-			return 3;
-		case 4:
-			return 2;
-		}
-
-		return -1;
-	}
-
 	/** Number of character required to store a coordinate */
 	static const size_t COORDINATE_SIZE = 20ul;
 	/** Number of elements stored in one group line */

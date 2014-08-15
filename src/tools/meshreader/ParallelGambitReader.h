@@ -149,13 +149,13 @@ public:
 	 *
 	 * @todo Only tetrahedral meshes are supported
 	 */
-	void readElements(unsigned int* elements)
+	void readElements(int* elements)
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
 		if (m_rank == 0) {
 			// Allocate second buffer so we can read and send in parallel
-			unsigned int* elements2 = new unsigned int[chunkSize * 4];
+			int* elements2 = new int[chunkSize * 4];
 			if (m_nProcs % 2 == 0)
 				// swap once so we have the correct buffer at the end
 				swap(elements, elements2);
@@ -166,7 +166,7 @@ public:
 				logInfo() << "Reading elements part" << i << "of" << m_nProcs;
 				m_serialReader.readElements(i * chunkSize, chunkSize, elements);
 				MPI_Wait(&request, MPI_STATUS_IGNORE);
-				MPI_Isend(elements, chunkSize*4, MPI_UNSIGNED, i, 0, m_comm, &request);
+				MPI_Isend(elements, chunkSize*4, MPI_INT, i, 0, m_comm, &request);
 				swap(elements, elements2);
 			}
 
@@ -175,7 +175,7 @@ public:
 			logInfo() << "Reading elements part" << (m_nProcs-1) << "of" << m_nProcs;
 			m_serialReader.readElements((m_nProcs-1) * chunkSize, lastChunkSize, elements);
 			MPI_Wait(&request, MPI_STATUS_IGNORE);
-			MPI_Isend(elements, lastChunkSize*4, MPI_UNSIGNED, m_nProcs-1, 0, m_comm, &request);
+			MPI_Isend(elements, lastChunkSize*4, MPI_INT, m_nProcs-1, 0, m_comm, &request);
 			swap(elements, elements2);
 
 			// Finally read the first part
@@ -188,7 +188,7 @@ public:
 			if (m_rank == m_nProcs-1)
 				chunkSize = m_nElements - (m_nProcs-1) * chunkSize;
 
-			MPI_Recv(elements, chunkSize*4, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
+			MPI_Recv(elements, chunkSize*4, MPI_INT, 0, 0, m_comm, MPI_STATUS_IGNORE);
 		}
 	}
 
@@ -200,7 +200,7 @@ public:
 	 *
 	 * This is a collective operation.
 	 */
-	void readGroups(unsigned int* groups)
+	void readGroups(int* groups)
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
@@ -208,7 +208,7 @@ public:
 			unsigned int maxChunkSize = chunkSize;
 			ElementGroup* map = new ElementGroup[maxChunkSize];
 
-			std::vector<unsigned int>* aggregator = new std::vector<unsigned int>[m_nProcs-1];
+			std::vector<int>* aggregator = new std::vector<int>[m_nProcs-1];
 			unsigned int* sizes = new unsigned int[m_nProcs-1];
 			MPI_Request* requests = new MPI_Request[(m_nProcs-1)*2];
 			for (int i = 0; i < m_nProcs-1; i++) {
@@ -250,7 +250,7 @@ public:
 
 					sizes[j] = aggregator[j].size() / 2; // element id + group number
 					MPI_Isend(&sizes[j], 1, MPI_UNSIGNED, j+1, 0, m_comm, &requests[j*2]);
-					MPI_Isend(&aggregator[j][0], aggregator[j].size(), MPI_UNSIGNED, j+1,
+					MPI_Isend(&aggregator[j][0], aggregator[j].size(), MPI_INT, j+1,
 							0, m_comm, &requests[j*2+1]);
 				}
 			}
@@ -273,7 +273,7 @@ public:
 			while (recieved < chunkSize) {
 				unsigned int size;
 				MPI_Recv(&size, 1, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
-				MPI_Recv(buf, size*2, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
+				MPI_Recv(buf, size*2, MPI_INT, 0, 0, m_comm, MPI_STATUS_IGNORE);
 
 				for (unsigned int i = 0; i < size*2; i += 2)
 					groups[buf[i]] = buf[i+1];
@@ -294,7 +294,7 @@ public:
 	 *
 	 * @todo Only tetrahedral meshes are supported
 	 */
-	void readBoundaries(unsigned int* boundaries)
+	void readBoundaries(int* boundaries)
 	{
 		unsigned int chunkSize = (m_nElements + m_nProcs - 1) / m_nProcs;
 
@@ -302,7 +302,7 @@ public:
 			unsigned int maxChunkSize = chunkSize;
 			BoundaryFace* faces = new BoundaryFace[maxChunkSize];
 
-			std::vector<unsigned int>* aggregator = new std::vector<unsigned int>[m_nProcs-1];
+			std::vector<int>* aggregator = new std::vector<int>[m_nProcs-1];
 			unsigned int* sizes = new unsigned int[m_nProcs-1];
 			MPI_Request* requests = new MPI_Request[(m_nProcs-1)*2];
 			for (int i = 0; i < m_nProcs-1; i++) {
@@ -346,7 +346,7 @@ public:
 
 					sizes[j] = aggregator[j].size() / 2; // element id + face type
 					MPI_Isend(&sizes[j], 1, MPI_UNSIGNED, j+1, 0, m_comm, &requests[j*2]);
-					MPI_Isend(&aggregator[j][0], aggregator[j].size(), MPI_UNSIGNED, j+1,
+					MPI_Isend(&aggregator[j][0], aggregator[j].size(), MPI_INT, j+1,
 							0, m_comm, &requests[j*2+1]);
 				}
 			}
@@ -378,7 +378,7 @@ public:
 					// Finished
 					break;
 
-				MPI_Recv(buf, size*2, MPI_UNSIGNED, 0, 0, m_comm, MPI_STATUS_IGNORE);
+				MPI_Recv(buf, size*2, MPI_INT, 0, 0, m_comm, MPI_STATUS_IGNORE);
 
 				for (unsigned int i = 0; i < size*2; i += 2)
 					boundaries[buf[i]] = buf[i+1];
