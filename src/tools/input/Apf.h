@@ -281,6 +281,12 @@ public:
 		m_mesh->end(it);
 	}
 
+	void write(const char* filename)
+	{
+		logInfo(PCU_Comm_Self()) << "Writing native APF mesh";
+		m_mesh->writeNative(filename);
+	}
+
 private:
 	static const unsigned int FACE2INTERNAL[];
 };

@@ -160,6 +160,8 @@ int main(int argc, char* argv[])
 	utils::Args args;
 	const char* source[] = {"gambit", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
+	args.addOption("dump", 'd', "Dump the mesh before partitioning it",
+			utils::Args::Required, false);
 	args.addOption("license", 'l', "License file (only used by SimModSuite)",
 			utils::Args::Required, false);
 	args.addOption("cad", 'c', "CAD file (only used by SimModSuite)",
@@ -225,6 +227,10 @@ int main(int argc, char* argv[])
 
 	Apf* mesh = new Apf(meshInput->getMesh());
 	delete meshInput;
+
+	const char* dumpFile = args.getArgument<const char*>("dump", 0L);
+	if (dumpFile)
+		mesh->write(dumpFile);
 
 	// Read elements
 	// TODO only tetrahedral meshes are currently supported
