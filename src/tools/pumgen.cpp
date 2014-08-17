@@ -28,6 +28,7 @@
 
 #include "input/Apf.h"
 #include "input/SerialMeshFile.h"
+#include "input/ApfNative.h"
 #ifdef USE_SIMMOD
 #include "input/SimModSuite.h"
 #endif // USE_SIMMOD
@@ -158,7 +159,7 @@ int main(int argc, char* argv[])
 
 	// Parse command line arguments
 	utils::Args args;
-	const char* source[] = {"gambit", "simmodsuite"};
+	const char* source[] = {"gambit", "apf", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
 	args.addOption("dump", 'd', "Dump the mesh before partitioning it",
 			utils::Args::Required, false);
@@ -207,6 +208,10 @@ int main(int argc, char* argv[])
 		meshInput = new SerialMeshFile<ParallelGambitReader>(inputFile);
 		break;
 	case 1:
+		logInfo(rank) << "Using APF native format";
+		meshInput = new ApfNative(inputFile);
+		break;
+	case 2:
 #ifdef USE_SIMMOD
 		logInfo(rank) << "Using SimModSuite";
 
