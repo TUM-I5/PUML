@@ -18,6 +18,7 @@
 #include <apfMesh2.h>
 #include <apfNumbering.h>
 #include <apfShape.h>
+#include <gmi.h>
 #include <maMesh.h>
 #include <PCU.h>
 
@@ -281,10 +282,12 @@ public:
 		m_mesh->end(it);
 	}
 
-	void write(const char* filename)
+	void write(const char* mesh, const char* model = 0L)
 	{
 		logInfo(PCU_Comm_Self()) << "Writing native APF mesh";
-		m_mesh->writeNative(filename);
+		m_mesh->writeNative(mesh);
+		if (model)
+			gmi_write_dmg(m_mesh->getModel(), model);
 	}
 
 private:
