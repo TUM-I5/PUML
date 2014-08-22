@@ -13,6 +13,8 @@
 #ifndef INPUT_APF_H
 #define INPUT_APF_H
 
+#include <limits>
+
 #include <apf.h>
 #include <apfMDS.h>
 #include <apfMesh2.h>
