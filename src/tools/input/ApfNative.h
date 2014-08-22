@@ -14,6 +14,7 @@
 #define APF_NATIVE_H
 
 #include <apfMDS.h>
+#include <gmi_mesh.h>
 #include <gmi_null.h>
 
 #include "utils/logger.h"
@@ -23,10 +24,15 @@
 class ApfNative : public MeshInput
 {
 public:
-	ApfNative(const char* filename)
+	ApfNative(const char* mesh, const char* model = 0L)
 	{
-		gmi_register_null();
-		m_mesh = apf::loadMdsMesh(".null", filename);
+		if (model)
+			gmi_register_mesh();
+		else {
+			gmi_register_null();
+			model = ".null";
+		}
+		m_mesh = apf::loadMdsMesh(model, mesh);
 	}
 };
 

@@ -211,7 +211,8 @@ int main(int argc, char* argv[])
 		break;
 	case 1:
 		logInfo(rank) << "Using APF native format";
-		meshInput = new ApfNative(inputFile);
+		meshInput = new ApfNative(inputFile,
+				args.getArgument<const char*>("model", 0L));
 		break;
 	case 2:
 #ifdef USE_SIMMOD
