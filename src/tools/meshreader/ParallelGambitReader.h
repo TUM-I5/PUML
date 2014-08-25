@@ -117,13 +117,15 @@ public:
 				swap(vertices, vertices2);
 			}
 
-			// Read last one
-			unsigned int lastChunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
-			logInfo() << "Reading vertices part" << (m_nProcs-1) << "of" << m_nProcs;
-			m_serialReader.readVertices((m_nProcs-1) * chunkSize, lastChunkSize, vertices);
-			MPI_Wait(&request, MPI_STATUS_IGNORE);
-			MPI_Isend(vertices, lastChunkSize*3, MPI_DOUBLE, m_nProcs-1, 0, m_comm, &request);
-			swap(vertices, vertices2);
+			if (m_nProcs > 1) {
+				// Read last one
+				unsigned int lastChunkSize = m_nVertices - (m_nProcs-1) * chunkSize;
+				logInfo() << "Reading vertices part" << (m_nProcs-1) << "of" << m_nProcs;
+				m_serialReader.readVertices((m_nProcs-1) * chunkSize, lastChunkSize, vertices);
+				MPI_Wait(&request, MPI_STATUS_IGNORE);
+				MPI_Isend(vertices, lastChunkSize*3, MPI_DOUBLE, m_nProcs-1, 0, m_comm, &request);
+				swap(vertices, vertices2);
+			}
 
 			// Finally read the first part
 			logInfo() << "Reading vertices part" << m_nProcs << "of" << m_nProcs;
@@ -170,13 +172,15 @@ public:
 				swap(elements, elements2);
 			}
 
-			// Read last one
-			unsigned int lastChunkSize = m_nElements - (m_nProcs-1) * chunkSize;
-			logInfo() << "Reading elements part" << (m_nProcs-1) << "of" << m_nProcs;
-			m_serialReader.readElements((m_nProcs-1) * chunkSize, lastChunkSize, elements);
-			MPI_Wait(&request, MPI_STATUS_IGNORE);
-			MPI_Isend(elements, lastChunkSize*4, MPI_INT, m_nProcs-1, 0, m_comm, &request);
-			swap(elements, elements2);
+			if (m_nProcs > 1) {
+				// Read last one
+				unsigned int lastChunkSize = m_nElements - (m_nProcs-1) * chunkSize;
+				logInfo() << "Reading elements part" << (m_nProcs-1) << "of" << m_nProcs;
+				m_serialReader.readElements((m_nProcs-1) * chunkSize, lastChunkSize, elements);
+				MPI_Wait(&request, MPI_STATUS_IGNORE);
+				MPI_Isend(elements, lastChunkSize*4, MPI_INT, m_nProcs-1, 0, m_comm, &request);
+				swap(elements, elements2);
+			}
 
 			// Finally read the first part
 			logInfo() << "Reading elements part" << m_nProcs << "of" << m_nProcs;
