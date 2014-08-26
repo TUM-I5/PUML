@@ -224,8 +224,6 @@ int main(int argc, char* argv[])
 			gmi_write_dmg(mesh->getModel(), modelFile);
 	}
 
-	delete meshInput;
-
 	// Compute min insphere radius
 	double min = std::numeric_limits<double>::max();
 	apf::MeshIterator* it = mesh->begin(3);
@@ -795,6 +793,8 @@ int main(int argc, char* argv[])
 
 		MPI_Comm_free(&commIO);
 	}
+
+	delete meshInput;
 
 	logInfo(rank) << "Finished successfully";
 
