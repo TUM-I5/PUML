@@ -18,15 +18,19 @@
 #include <string>
 #include <vector>
 
-#include "utils/args.h"
-#include "utils/logger.h"
-
 #include <parmetis.h>
 
 #include <netcdf_par.h>
 #include <netcdf.h>
 
-#include "input/Apf.h"
+#include <apfMesh2.h>
+#include <apfNumbering.h>
+#include <apfZoltan.h>
+#include <maMesh.h>
+
+#include "utils/args.h"
+#include "utils/logger.h"
+
 #include "input/SerialMeshFile.h"
 #include "input/ApfNative.h"
 #ifdef USE_SIMMOD
@@ -34,39 +38,22 @@
 #endif // USE_SIMMOD
 #include "meshreader/ParallelGambitReader.h"
 
-struct Element {
-	/** Global id */
-	unsigned int id;
-	/** Vertex ids */
-	unsigned int vertex[4];
-	/** The group number */
-	unsigned int group;
-	/** The boundary conditions */
-	unsigned int boundaries[4];
-	/** The neighbor ids */
-	int neighbors[4];
-
-	/**
-	 * Compare elements by the global id
-	 */
-	bool operator<(const Element& e) const
-	{
-		return id < e.id;
-	}
-};
+const static unsigned int FACE2INTERNAL[] = {0, 1, 3, 2};
 
 struct MPINeighborElement {
-	/** Local number of the local element */
-	int localElement;
+	/** Local element */
+	apf::MeshEntity* element;
+	/**	Global id of the local element */
+	long localId;
 	/** Side of the local element */
 	int localSide;
 	/** Global number neighbor element */
-	int neighborElement;
+	long neighborId;
 	/** Side of the neighbor element */
 	int neighborSide;
 };
 
-void checkNcError(int error)
+static void checkNcError(int error)
 {
 	if (error != NC_NOERR)
 		logError() << "Error while writing netCDF file:" << nc_strerror(error);
@@ -74,69 +61,57 @@ void checkNcError(int error)
 
 bool compareLocalMPINeighbor(const MPINeighborElement &elem1, const MPINeighborElement &elem2)
 {
-	return (elem1.localElement < elem2.localElement)
-			|| (elem1.localElement == elem2.localElement && elem1.localSide < elem2.localSide);
+	return (elem1.localId < elem2.localId)
+			|| (elem1.localId == elem2.localId && FACE2INTERNAL[elem1.localSide] < FACE2INTERNAL[elem2.localSide]);
 }
 
 bool compareRemoteMPINeighbor(const MPINeighborElement &elem1, const MPINeighborElement &elem2)
 {
-	return (elem1.neighborElement < elem2.neighborElement)
-				|| (elem1.neighborElement == elem2.neighborElement && elem1.neighborSide < elem2.neighborSide);
-}
-
-/**
- * @param[out] result Upon return a bit mask that indicates which values where found and which not
- */
-template<class InputIterator1, class InputIterator2>
-void findAllBit(InputIterator1 first, InputIterator1 last, InputIterator2 firstVal, InputIterator2 lastVal, int* result)
-{
-	size_t pos = 0;
-	while (firstVal != lastVal) {
-		if (pos % (sizeof(int)*8) == 0)
-			result[pos / (sizeof(int)*8)] = 0;
-
-		InputIterator1 ret = std::find(first, last, *firstVal);
-		if (ret != last)
-			result[pos / (sizeof(int)*8)] |= 1<<(pos % (sizeof(int)*8));
-
-		firstVal++;
-		pos++;
-	}
-}
-
-/**
- * @return The corresponding face to the bitmask
- */
-int faceOfMask(int mask)
-{
-	switch (mask) {
-	case 7:
-		return 0;
-	case 11:
-		return 1;
-		break;
-	case 13:
-		return 2;
-	case 14:
-		return 3;
-	default:
-		logError() << "Dual graph is wrong";
-	}
-
-	return -1;
+	return (elem1.neighborId < elem2.neighborId)
+			|| (elem1.neighborId == elem2.neighborId && FACE2INTERNAL[elem1.neighborSide] < FACE2INTERNAL[elem2.neighborSide]);
 }
 
 /** Maps from element + face to orientation */
-const static int face2orientation[4][4] = {
-		{0, 0, 0, -1},
-		{2, 1, -1, 0},
-		{1, -1, 2, 1},
-		{-1, 2, 1, 2}
-		//{0, 2, 1},
-		//{0, 1, 3},
-		//{0, 3, 2},
-		//{1, 2, 3}
+const static int FACE2ORIENTATION[4][4] = {
+		{0, 2, 1, -1},
+		{0, 1, -1, 2},
+		{-1, 0, 1, 2},
+		{0, -1, 2, 1}
 };
+
+static int getOrientation(const long* localVertNum, int localFace, long firstNbVert)
+{
+	unsigned int off = std::find(localVertNum, localVertNum+4, firstNbVert)-localVertNum;
+	assert(off >= 0 && off <= 3);
+	int o = FACE2ORIENTATION[localFace][off];
+	assert(o >= 0);
+	return o;
+}
+
+static apf::MeshEntity* getFaceElemOppositeElem(apf::Mesh* m,
+		apf::MeshEntity* face, apf::MeshEntity* elem)
+{
+	apf::Up up;
+	m->getUp(face, up);
+	if (up.n <= 1)
+		return 0L;
+	if (up.e[0] == elem)
+		return up.e[1];
+	return up.e[0];
+}
+
+/**
+ * @return The number of the first vertex for face <code>face</code>
+ *  of the element <code>element</code>
+ */
+static long getFirstNumOfFace(apf::GlobalNumbering* num,
+		apf::MeshEntity* element, int face)
+{
+	apf::NewArray<long> vn;
+	apf::getElementNumbers(num, element, vn);
+
+	return vn[face == 2 ? 1 : 0];
+}
 
 const static int METIS_RANDOM_SEED = 42;
 
@@ -188,9 +163,6 @@ int main(int argc, char* argv[])
 	if (nPartitions == 0)
 		logError() << "Partitions created must be greater than zero";
 
-	if (nPartitions <= ((nPartitions + processes - 1) / processes) * (processes-1))
-		logError() << "Not every process will get at least one partition, use a smaller number of ranks";
-
 	std::string outputFile;
 	if (args.isSetAdditional("output")) {
 		outputFile = args.getAdditionalArgument<std::string>("output");
@@ -204,6 +176,7 @@ int main(int argc, char* argv[])
 	}
 
 	MeshInput* meshInput = 0L;
+	apf::Mesh2* mesh = 0L;
 	switch (args.getArgument<int>("source", 0)) {
 	case 0:
 		logInfo(rank) << "Using Gambit mesh";
@@ -233,66 +206,87 @@ int main(int argc, char* argv[])
 		logError() << "Unknown source";
 	}
 
-	Apf* mesh = new Apf(meshInput->getMesh());
+	mesh = meshInput->getMesh();
 
+	// Check mesh
+	if (alignMdsMatches(mesh))
+		logWarning() << "Fixed misaligned matches";
+	mesh->verify();
+
+	// Dump mesh for later usage?
 	const char* dumpFile = args.getArgument<const char*>("dump", 0L);
-	if (dumpFile)
-		mesh->write(dumpFile, args.getArgument<const char*>("model", 0L));
+	if (dumpFile) {
+		logInfo(PCU_Comm_Self()) << "Writing native APF mesh";
+		mesh->writeNative(dumpFile);
+
+		const char* modelFile = args.getArgument<const char*>("model", 0L);
+		if (modelFile)
+			gmi_write_dmg(mesh->getModel(), modelFile);
+	}
 
 	delete meshInput;
 
-	// Read elements
-	// TODO only tetrahedral meshes are currently supported
-	unsigned int* elements;
-	MPI_Alloc_mem(mesh->nLocalElements()*4*sizeof(unsigned int), MPI_INFO_NULL, &elements);
-	mesh->getElements(elements);
+	// Compute min insphere radius
+	double min = std::numeric_limits<double>::max();
+	apf::MeshIterator* it = mesh->begin(3);
+	while (apf::MeshEntity* element = mesh->iterate(it)) {
+		min = std::min(min, ma::getInsphere(mesh, element));
+	}
+	mesh->end(it);
+	MPI_Reduce((rank == 0 ? MPI_IN_PLACE : &min),
+			&min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+	logInfo(rank) << "Minimum insphere found:" << min;
+
+	// Get local size
+	unsigned int nLocalElements = apf::countOwned(mesh, 3);
+
+	// Get global size
+	unsigned int nElements;
+	MPI_Allreduce(&nLocalElements, &nElements, 1, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
+
+	// Get element mapping
+    unsigned int* elemStart = new unsigned int[processes];
+    MPI_Scan(&nLocalElements, &elemStart[rank], 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
+    elemStart[rank] -= nLocalElements;
+    MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, elemStart, 1, MPI_UNSIGNED,
+    		MPI_COMM_WORLD);
+
+    // Create dual graph
+    logInfo(rank) << "Creating dual graph";
+	int* dualGraph = apf::getElementToElement(mesh);
+
+	// Create the partitions
+	logInfo(rank) << "Creating partitions with METIS";
 
 	// TODO wrap this code part so we can switch to different libraries
-	logInfo(rank) << "Creating dual graph with METIS";
 	idx_t* elemDist = new idx_t[processes+1];
 	for (int i = 0; i < processes; i++)
-		elemDist[i] = mesh->elemStart(i);
-	elemDist[processes] = mesh->nElements();
+		elemDist[i] = elemStart[i];
+	elemDist[processes] = nElements;
 
-	idx_t* eptr = new idx_t[mesh->nLocalElements()+1];
-	for (unsigned int i = 0; i < mesh->nLocalElements()+1; i++)
-		eptr[i] = i * 4;
-
-	idx_t* eind = new idx_t[mesh->nLocalElements()*4];
-	for (unsigned int i = 0; i < mesh->nLocalElements()*4; i++)
-		eind[i] = elements[i];
-
-	idx_t numflag = 0;
-	idx_t ncommonnodes = 3;
-
-	idx_t* xadj;
-	idx_t* adjncy;
-	MPI_Comm commWorld = MPI_COMM_WORLD;
-	if (ParMETIS_V3_Mesh2Dual(elemDist, eptr, eind, &numflag, &ncommonnodes, &xadj, &adjncy, &commWorld) != METIS_OK)
-		logError() << "Could not create dual graph";
-
-	delete [] eptr;
-	delete [] eind;
-
-	logInfo(rank) << "Creating neighborhood information";
-	int* elementNeighbors = new int[mesh->nLocalElements()*4];
-	for (unsigned int i = 0; i < mesh->nLocalElements(); i++) {
-		idx_t j;
-		for (j = 0; j < xadj[i+1]-xadj[i]; j++)
-			elementNeighbors[i*4 + j] = adjncy[xadj[i] + j];
-
-		for (; j < 4; j++)
-			elementNeighbors[i*4 + j] = -1;
-
+	idx_t* xadj = new idx_t[nLocalElements+1];
+	xadj[0] = 0;
+	for (unsigned int i = 0; i < nLocalElements; i++) {
+		int neighbors = 0;
+		for (unsigned int j = 0; j < 4; j++)
+			if (dualGraph[i*4 + j] >= 0)
+				neighbors++;
+		xadj[i+1] = xadj[i] +  neighbors;
 	}
 
-	// Read boundary information from the mesh
-	unsigned int* boundaries = new unsigned int[mesh->nLocalElements()*4];
-	memset(boundaries, 0, mesh->nLocalElements()*4*sizeof(unsigned int));
-	mesh->getBoundaries(boundaries);
+	idx_t* adjncy = new idx_t[xadj[nLocalElements]];
+	unsigned int pos = 0;
+	for (unsigned int i = 0; i < nLocalElements*4; i++) {
+		if (dualGraph[i] >= 0) {
+			adjncy[pos] = dualGraph[i];
+			pos++;
+		}
+	}
 
-	logInfo(rank) << "Creating partitions with METIS";
+	delete [] dualGraph;
+
 	idx_t wgtflag = 0;
+	idx_t numflag = 0;
 	idx_t ncon = 1;
 	idx_t nparts = nPartitions;
 
@@ -304,638 +298,503 @@ int main(int argc, char* argv[])
 	idx_t options[3] = {1, 0, METIS_RANDOM_SEED};
 
 	idx_t edgecut;
-	idx_t* part = new idx_t[mesh->nLocalElements()];
+	idx_t* part = new idx_t[nLocalElements];
 
+	MPI_Comm commWorld = MPI_COMM_WORLD;
 	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, 0L, 0L, &wgtflag, &numflag, &ncon,
 			&nparts, tpwgts, &ubev, options, &edgecut, part, &commWorld) != METIS_OK)
-		logError() << "Could create partitions";
-
-#if 0
-	// Test partitioning
-	std::stringstream ss;
-	ss << "test-" << rank << ".data";
-
-	std::ofstream output(ss.str());
-
-	for (unsigned int i = 0; i < nLocalElements; i++) {
-		output << (i+rank*nMaxLocalElements) << ' ' << part[i] << std::endl;
-	}
-#endif
+		logError() << "Could not create partitions";
 
 	delete [] elemDist;
+	delete [] xadj;
+	delete [] adjncy;
 	delete [] tpwgts;
 
-	METIS_Free(xadj);
-	METIS_Free(adjncy);
-
-	// Read group information
-	unsigned int* elementGroups = new unsigned int[mesh->nLocalElements()];
-	mesh->getGroups(elementGroups);
-
-	logInfo(rank) << "Redistributing elements";
+	// Compute the number of partitions for each rank
 	unsigned int nMaxLocalPart = (nPartitions + processes - 1) / processes;
 	unsigned int nLocalPart = nMaxLocalPart;
-	if (rank == processes - 1)
-		nLocalPart = nPartitions - (processes-1) * nMaxLocalPart;
+	if (nPartitions < (rank+1) * nMaxLocalPart)
+		nLocalPart = std::max(0, static_cast<int>(nPartitions - rank * nMaxLocalPart));
 
-	// Redistribute the elements among the processors according to there partitions
-	// Count number local elements in each partition
-	unsigned int* localPartPtr = new unsigned int[nLocalPart+1];
-	localPartPtr[0] = 0;
+	// Migrate elements and set partition
+	logInfo(rank) << "Redistributing elements";
 
-	Element* localPartElements;
+	apf::MeshTag* partitionTag = mesh->createIntTag("partition", 1);
 
-	unsigned int pos;	// Helper variable
+	apf::Migration* plan = new apf::Migration(mesh);
 
-	std::vector<unsigned int>* elementPerPart = new std::vector<unsigned int>[nPartitions];
-	for (unsigned int i = 0; i < mesh->nLocalElements(); i++)
-		elementPerPart[part[i]].push_back(i);
-	unsigned int* nElementPerPart = new unsigned int[nPartitions];
-	for (unsigned int i = 0; i < nPartitions; i++)
-		nElementPerPart[i] = elementPerPart[i].size();
+	it = mesh->begin(3);
+	for (unsigned int i = 0; i < nLocalElements; i++) {
+		apf::MeshEntity* element = mesh->iterate(it);
 
-	// Tell each processor how many elements we are going to send
-	int* sendcounts = new int[processes];
-	int* senddispls = new int[processes];
-	for (int i = 0; i < processes-1; i++) {
-		sendcounts[i] = nMaxLocalPart;
-		senddispls[i] = nMaxLocalPart * i;
+		int p = part[i];
+		mesh->setIntTag(element, partitionTag, &p);
+
+		if (static_cast<unsigned int>(rank) != part[i] / nMaxLocalPart)
+			plan->send(element, part[i] / nMaxLocalPart);
 	}
-	sendcounts[processes-1] = nPartitions - (processes-1) * nMaxLocalPart;
-	senddispls[processes-1] = (processes-1) * nMaxLocalPart;
-
-	unsigned int* recvSize = new unsigned int[processes * nLocalPart];
-	int* recvcounts = new int[processes];
-	int* recvdispls = new int[processes];
-	for (int i = 0; i < processes; i++) {
-		recvcounts[i] = nLocalPart;
-		recvdispls[i] = nLocalPart * i;
-	}
-
-	MPI_Alltoallv(nElementPerPart, sendcounts, senddispls, MPI_UNSIGNED,
-			recvSize, recvcounts, recvdispls, MPI_UNSIGNED, MPI_COMM_WORLD);
-
-	// Now send the the element to all processes
-	Element* sendElements = new Element[mesh->nLocalElements()];
-	pos = 0;
-	for (unsigned int i = 0; i < nPartitions; i++) {
-		for (unsigned int j = 0; j < nElementPerPart[i]; j++) {
-			// Set global id
-			sendElements[pos].id = elementPerPart[i][j] + mesh->elemStart(rank);
-			memcpy(sendElements[pos].vertex,
-					&elements[elementPerPart[i][j]*4], 4*sizeof(unsigned int));
-			sendElements[pos].group = elementGroups[elementPerPart[i][j]];
-			memcpy(sendElements[pos].boundaries,
-					&boundaries[elementPerPart[i][j]*4], 4*sizeof(unsigned int));
-			memcpy(sendElements[pos].neighbors,
-					&elementNeighbors[elementPerPart[i][j]*4], 4*sizeof(int));
-			pos++;
-		}
-	}
-
-	delete [] elementGroups;
-	delete [] boundaries;
-	delete [] elementNeighbors;
-
-	memset(sendcounts, 0, sizeof(int) * processes);
-	for (unsigned int i = 0; i < nPartitions; i++) {
-		sendcounts[i / nMaxLocalPart] += nElementPerPart[i];
-	}
-	senddispls[0] = 0;
-	for (int i = 1; i < processes; i++)
-		senddispls[i] = senddispls[i-1] + sendcounts[i-1];
-
-	memset(recvcounts, 0, sizeof(int) * processes);
-	for (int i = 0; i < processes; i++) {
-		for (unsigned int j = 0; j < nLocalPart; j++)
-			recvcounts[i] += recvSize[i*nLocalPart + j];
-	}
-	recvdispls[0] = 0;
-	for (int i = 1; i < processes; i++)
-		recvdispls[i] = recvdispls[i-1] + recvcounts[i-1];
-
-	unsigned int recvSum = 0;
-	for (int i = 0; i < processes; i++) {
-		recvSum += recvcounts[i];
-	}
-	Element* recvElements = new Element[recvSum];
-
-	// Create the MPI datatype
-	int blockLength[] = {1, 4, 1, 4, 4};
-	MPI_Aint displacement[] = {0, reinterpret_cast<uintptr_t>(recvElements[0].vertex)
-			- reinterpret_cast<uintptr_t>(&recvElements[0]),
-			reinterpret_cast<uintptr_t>(&recvElements[0].group)
-			- reinterpret_cast<uintptr_t>(&recvElements[0]),
-			reinterpret_cast<uintptr_t>(recvElements[0].boundaries)
-			- reinterpret_cast<uintptr_t>(&recvElements[0]),
-			reinterpret_cast<intptr_t>(recvElements[0].neighbors)
-			- reinterpret_cast<intptr_t>(&recvElements[0])};
-	MPI_Datatype type[] = {MPI_UNSIGNED, MPI_UNSIGNED, MPI_UNSIGNED,
-			MPI_UNSIGNED, MPI_INT};
-	MPI_Datatype elementType;
-	MPI_Type_create_struct(5, blockLength, displacement, type, &elementType);
-	MPI_Type_commit(&elementType);
-
-	MPI_Alltoallv(sendElements, sendcounts, senddispls, elementType,
-			recvElements, recvcounts, recvdispls, elementType, MPI_COMM_WORLD);
-
-	MPI_Type_free(&elementType);
-
-	delete [] sendcounts;
-	delete [] senddispls;
-	delete [] recvcounts;
-	delete [] recvdispls;
-	delete [] sendElements;
-
-	delete [] nElementPerPart;
-	delete [] elementPerPart;
-
-	// Compute the size of each local partition
-	unsigned int* partSize = new unsigned int[nLocalPart];
-	memset(partSize, 0, sizeof(unsigned int)*nLocalPart);
-	for (int i = 0; i < processes; i++) {
-		for (unsigned int j = 0; j < nLocalPart; j++) {
-			partSize[j] += recvSize[i*nLocalPart + j];
-		}
-	}
-	for (unsigned int i = 1; i < nLocalPart+1; i++) {
-		localPartPtr[i] = localPartPtr[i-1] + partSize[i-1];
-	}
-
-	delete [] partSize;
-
-	// Sort elements by partitions
-	localPartElements = new Element[localPartPtr[nLocalPart]];
-	unsigned int* actPartPos = new unsigned int[nLocalPart];
-	memcpy(actPartPos, localPartPtr, sizeof(unsigned int)*nLocalPart);
-	unsigned int actRecvPos = 0;
-	for (int i = 0; i < processes; i++) {
-		for (unsigned int j = 0; j < nLocalPart; j++) {
-			memcpy(&localPartElements[actPartPos[j]], &recvElements[actRecvPos],
-					sizeof(Element)*recvSize[i*nLocalPart + j]);
-			actPartPos[j] += recvSize[i*nLocalPart + j];
-			actRecvPos += recvSize[i*nLocalPart + j];
-		}
-	}
-	delete [] actPartPos;
-
-	delete [] recvElements;
-	delete [] recvSize;
-
-	// Save the partition information because other processes still need it
-	// But copy it to an unsigned int
-	unsigned int* elementPart;
-	MPI_Alloc_mem(mesh->nLocalElements()*sizeof(unsigned int), MPI_INFO_NULL, &elementPart);
-	for (unsigned int i = 0; i < mesh->nLocalElements(); i++)
-		elementPart[i] = part[i];
+	mesh->end(it);
 
 	delete [] part;
 
-	logInfo(rank) << "Sorting element ids";
-	for (unsigned int i = 0; i < nLocalPart; i++)
-		std::sort(&localPartElements[localPartPtr[i]],
-				&localPartElements[localPartPtr[i]]+localPartPtr[i+1]-localPartPtr[i]);
+	mesh->migrate(plan);
 
-	logInfo(rank) << "Computing element data";
-	// Create MPI window to allow access to all elements
-	MPI_Win elementWindow;
-	MPI_Win_create(elements, mesh->nLocalElements()*4*sizeof(unsigned int),
-			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementWindow);
+	// Create numbering for the vertices/elements
+	apf::GlobalNumbering* vertexNum = apf::makeGlobal(
+			apf::numberOwnedNodes(mesh, "vertices"));
+	apf::synchronize(vertexNum);
+	apf::GlobalNumbering* elementNum = apf::makeGlobal(
+			apf::numberOwnedDimension(mesh, "elements", 3));
 
-	// Create window for partition information
-	MPI_Win elementPartWindow;
-	MPI_Win_create(elementPart, mesh->nLocalElements()*sizeof(unsigned int),
-			sizeof(unsigned int), MPI_INFO_NULL, MPI_COMM_WORLD, &elementPartWindow);
+	// Send/Recv orientation for ghost layers
+	logInfo(rank) << "Exchanging ghost layer information";
+	PCU_Comm_Begin();
+	it = mesh->begin(3);
+	while (apf::MeshEntity* element = mesh->iterate(it)) {
+		apf::Downward faces;
+		mesh->getDownward(element, 2, faces);
 
-	// Create map from local elements to ids inside their partition
-	std::map<unsigned int, unsigned int> globalElem2PartId;
-
-	unsigned int curPart = 0;
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++) {
-		if (i >= localPartPtr[curPart+1])
-			curPart++;
-
-		globalElem2PartId[localPartElements[i].id] = i-localPartPtr[curPart];
-	}
-
-	int* localPartElemNb = new int[localPartPtr[nLocalPart]*4];
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]*4; i++)
-		localPartElemNb[i] = -1;
-	unsigned int* localPartElemNbSide = new unsigned int[localPartPtr[nLocalPart]*4];
-	memset(localPartElemNbSide, 0, sizeof(unsigned int)*4*localPartPtr[nLocalPart]);
-	unsigned int* localPartElemNbOrient = new unsigned int[localPartPtr[nLocalPart]*4];
-	memset(localPartElemNbOrient, 0, sizeof(unsigned int)*4*localPartPtr[nLocalPart]);
-	unsigned int* localPartElemBoundary = new unsigned int[localPartPtr[nLocalPart]*4];
-	int* localPartElemRanks = new int[localPartPtr[nLocalPart]*4];
-	std::map<unsigned int, std::vector<MPINeighborElement> >* boundaryMaps
-		= new std::map<unsigned int, std::vector<MPINeighborElement> >[nLocalPart];
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]*4; i++)
-		localPartElemRanks[i] = -1;
-	curPart = 0;
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++) {
-		if (i >= localPartPtr[curPart+1])
-			curPart++;
-
-		// Set boundary (do this for all boundaries, because of inner boundary conditions)
-		memcpy(&localPartElemBoundary[i*4], localPartElements[i].boundaries, 4*sizeof(unsigned int));
-
-		for (int j = 0; j < 4; j++) {
-			if (localPartElements[i].neighbors[j] < 0)
+		for (unsigned int i = 0; i < 4; i++) {
+			if (!mesh->isShared(faces[i]))
 				continue;
 
-			// Check whether we are in the same partition
-			unsigned int neighborPart;
-			MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfElem(localPartElements[i].neighbors[j]),
-					MPI_MODE_NOCHECK, elementPartWindow);
-			MPI_Get(&neighborPart, 1, MPI_UNSIGNED,
-					mesh->rankOfElem(localPartElements[i].neighbors[j]),
-					mesh->posOfElem(localPartElements[i].neighbors[j]),
-					1, MPI_UNSIGNED, elementPartWindow);
-			MPI_Win_unlock(mesh->rankOfElem(localPartElements[i].neighbors[j]), elementPartWindow);
-
-			unsigned int neighborVertices[4];
-			MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfElem(localPartElements[i].neighbors[j]),
-					MPI_MODE_NOCHECK, elementWindow);
-			MPI_Get(neighborVertices, 4, MPI_UNSIGNED,
-					mesh->rankOfElem(localPartElements[i].neighbors[j]),
-					mesh->posOfElem(localPartElements[i].neighbors[j]) * 4,
-					4, MPI_UNSIGNED, elementWindow);
-			MPI_Win_unlock(mesh->rankOfElem(localPartElements[i].neighbors[j]), elementWindow);
-
-			int mask;
-			findAllBit(neighborVertices, neighborVertices+4, localPartElements[i].vertex, localPartElements[i].vertex+4, &mask);
-			int face = faceOfMask(mask);
-
-			// Set neighbor partition
-			localPartElemRanks[i*4 + face] = neighborPart;
-
-			// Find the side of the neighbor element
-			findAllBit(localPartElements[i].vertex, localPartElements[i].vertex+4, neighborVertices, neighborVertices+4, &mask);
-			int face2 = faceOfMask(mask);
-			localPartElemNbSide[i*4 + face] = face2;
-
-			if (neighborPart == curPart+(rank*nMaxLocalPart))
-				// Set neighbor only if its the same partition
-				localPartElemNb[i*4 + face] = globalElem2PartId.at(localPartElements[i].neighbors[j]);
-			else {
-				// Mark id as neighbor
-				MPINeighborElement neighborElement = {static_cast<int>(i-localPartPtr[curPart]),
-						face, localPartElements[i].neighbors[j], face2};
-				boundaryMaps[curPart][neighborPart].push_back(neighborElement);
-			}
-
-			// Find the first vertex of the local face in the neighboring face
-			int orientation = face2orientation[std::find(neighborVertices, neighborVertices+4,
-					localPartElements[i].vertex[face < 3 ? 0 : 1]) - neighborVertices][face2];
-			if (orientation < 0)
-				logError() << "Dual mesh is incorrect";
-			localPartElemNbOrient[i*4 + face] = orientation;
-		}
-
-		// Set all not local neighbors
-		for (int j = 0; j < 4; j++) {
-			if (localPartElemNb[i*4 + j] < 0) {
-				localPartElemNb[i*4 + j] = localPartPtr[curPart+1]-localPartPtr[curPart];
-
-				// Set rank on real boundaries
-				if (localPartElemRanks[i*4 + j] < 0)
-					localPartElemRanks[i*4 + j] = curPart+(rank*nMaxLocalPart);
-			}
+			// Send local face id and global vertex id
+			// of the first vertex
+			apf::Copy other = apf::getOtherCopy(mesh, faces[i]);
+			PCU_COMM_PACK(other.peer, other.entity);
+			int p;
+			mesh->getIntTag(element, partitionTag, &p);
+			PCU_COMM_PACK(other.peer, p);
+			PCU_COMM_PACK(other.peer, i);
+			long eid = apf::getNumber(elementNum, apf::Node(element, 0));
+			PCU_COMM_PACK(other.peer, eid);
+			long vid = getFirstNumOfFace(vertexNum, element, i);
+			PCU_COMM_PACK(other.peer, vid);
 		}
 	}
+	mesh->end(it);
+	PCU_Comm_Send();
 
-	logInfo(rank) << "Sorting MPI boundaries";
-	unsigned int* localPartElemMPI = new unsigned int[localPartPtr[nLocalPart]*4];
-	memset(localPartElemMPI, 0, sizeof(unsigned int)*localPartPtr[nLocalPart]*4);
-	#pragma omp parallel for
-	for (unsigned int i = 0; i < nLocalPart; i++) {
-		for (std::map<unsigned int, std::vector<MPINeighborElement> >::iterator j = boundaryMaps[i].begin();
-				j != boundaryMaps[i].end(); j++) {
-			if (i+(rank*nMaxLocalPart) > j->first)
-				std::sort(j->second.begin(), j->second.end(), compareRemoteMPINeighbor);
-			else
-				std::sort(j->second.begin(), j->second.end(), compareLocalMPINeighbor);
+	apf::MeshTag* remoteInfo1 = mesh->createIntTag("remote info 1", 2);
+	apf::MeshTag* remoteInfo2 = mesh->createLongTag("remote info 2", 2);
 
-			// After sorting set the mpi index for the elements
-			for (unsigned int k = 0; k < j->second.size(); k++)
-				localPartElemMPI[(j->second[k].localElement + localPartPtr[i])*4 + j->second[k].localSide] = k;
-		}
+	while (PCU_Comm_Receive()) {
+		apf::MeshEntity* face;
+		PCU_COMM_UNPACK(face);
+		int info1[2];
+		PCU_Comm_Unpack(info1, sizeof(info1));
+		mesh->setIntTag(face, remoteInfo1, info1);
+		long info2[2];
+		PCU_Comm_Unpack(info2, sizeof(info2));
+		mesh->setLongTag(face, remoteInfo2, info2);
 	}
 
-	logInfo(rank) << "Creating vertices maps";
-	std::map<unsigned int, unsigned int>* localPartVerticesMaps = new std::map<unsigned int, unsigned int>[nLocalPart];
-	unsigned int* localPartVertexSize = new unsigned int[nLocalPart];
-	memset(localPartVertexSize, 0, sizeof(unsigned int)*nLocalPart);
-	#pragma omp parallel for
-	for (unsigned int i = 0; i < nLocalPart; i++) {
-		for (unsigned int j = localPartPtr[i]; j < localPartPtr[i+1]; j++) {
-			for (int k = 0; k < 4; k++) {
-				if (localPartVerticesMaps[i].find(localPartElements[j].vertex[k]) == localPartVerticesMaps[i].end()) {
-					// New vertices
-					localPartVerticesMaps[i][localPartElements[j].vertex[k]] = localPartVertexSize[i];
-					localPartElements[j].vertex[k] = localPartVertexSize[i];
-					localPartVertexSize[i]++;
+	// Element map is stored as a tag
+	apf::MeshTag* localId = mesh->createIntTag("local id", 1);
+
+	// MPI index is also stored as a tag
+	apf::MeshTag* mpiIndex = mesh->createIntTag("MPI index", 1);
+
+	// Get tags from mesh sources
+	apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
+	apf::MeshTag* groupTag = mesh->findTag("group");
+
+	// Create communicator for I/O
+	MPI_Comm commIO;
+	MPI_Comm_split(MPI_COMM_WORLD, (nLocalPart > 0 ? 0 : MPI_UNDEFINED), 0, &commIO);
+
+	if (nLocalPart > 0) {
+		logInfo(rank) << "Creating element, vertex and boundary maps";
+		unsigned int* elemSize = new unsigned int[nLocalPart];
+		memset(elemSize, 0, nLocalPart * sizeof(unsigned int));
+		std::map<apf::MeshEntity*, unsigned int>* vertexMap =
+				new std::map<apf::MeshEntity*, unsigned int>[nLocalPart];
+		std::map<unsigned int, std::vector<MPINeighborElement> >* boundaryMap =
+				new std::map<unsigned int, std::vector<MPINeighborElement> >[nLocalPart];
+
+		it = mesh->begin(3);
+		while (apf::MeshEntity* element = mesh->iterate(it)) {
+			// Create element map and count elements
+			int p;
+			mesh->getIntTag(element, partitionTag, &p);
+			int id = elemSize[p % nMaxLocalPart];
+			mesh->setIntTag(element, localId, &id);
+			elemSize[p % nMaxLocalPart]++;
+
+			// Create vertex map
+			apf::Downward vertices;
+			mesh->getDownward(element, 0, vertices);
+			for (unsigned int i = 0; i < 4; i++) {
+				if (vertexMap[p % nMaxLocalPart].find(vertices[i])
+						== vertexMap[p % nMaxLocalPart].end()) {
+					unsigned int s = vertexMap[p % nMaxLocalPart].size();
+					vertexMap[p % nMaxLocalPart][vertices[i]] = s;
+				}
+			}
+
+			// Compute boundary map
+			apf::Downward faces;
+			mesh->getDownward(element, 2, faces);
+
+			for (unsigned int i = 0; i < 4; i++) {
+				if (mesh->isShared(faces[i])) {
+					int info1[2];
+					mesh->getIntTag(faces[i], remoteInfo1, info1);
+					long info2[2];
+					mesh->getLongTag(faces[i], remoteInfo2, info2);
+					MPINeighborElement neighbor = {
+							element,
+							apf::getNumber(elementNum, apf::Node(element, 0)),
+							static_cast<int>(i),
+							info2[0],
+							info1[1]
+
+					};
+					boundaryMap[p % nMaxLocalPart][info1[0]].push_back(neighbor);
 				} else {
-					// Vertex already found
-					localPartElements[j].vertex[k] = localPartVerticesMaps[i][localPartElements[j].vertex[k]];
+					apf::MeshEntity* n = getFaceElemOppositeElem(mesh, faces[i], element);
+					if (!n)
+						// Geometric boundary
+						continue;
+
+					int np;
+					mesh->getIntTag(n, partitionTag, &np);
+
+					if (np == p)
+						// Not an MPI boundary
+						continue;
+
+					apf::Downward nf;
+					mesh->getDownward(n, 2, nf);
+					MPINeighborElement neighbor = {
+							element,
+							apf::getNumber(elementNum, apf::Node(element, 0)),
+							static_cast<int>(i),
+							apf::getNumber(elementNum, apf::Node(n, 0)),
+							apf::findIn(nf, 4, faces[i])
+
+					};
+					boundaryMap[p % nMaxLocalPart][np].push_back(neighbor);
 				}
 			}
 		}
-	}
+		mesh->end(it);
 
-	logInfo(rank) << "Computing maximum partition size";
-	// Compute max number of elements in a partition
-	unsigned int maxPartSize = localPartPtr[1];
-	for (unsigned int i = 1; i < nLocalPart; i++)
-		if (maxPartSize < localPartPtr[i+1]-localPartPtr[i])
-			maxPartSize = localPartPtr[i+1]-localPartPtr[i];
-	MPI_Allreduce(MPI_IN_PLACE, &maxPartSize, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
+		// Sorting boundary maps and set mpi index tag
+		for (unsigned int i = 0; i < nLocalPart; i++) {
+			for (std::map<unsigned int, std::vector<MPINeighborElement> >::iterator it = boundaryMap[i].begin();
+					it != boundaryMap[i].end(); it++) {
+				if (i+(rank*nMaxLocalPart) > it->first)
+					std::sort(it->second.begin(), it->second.end(), compareRemoteMPINeighbor);
+				else
+					std::sort(it->second.begin(), it->second.end(), compareLocalMPINeighbor);
 
-	// Compute max number of vertices in a partition
-	unsigned int maxVertices = localPartVertexSize[0];
-	for (unsigned int i = 1; i < nLocalPart; i++)
-		if (maxVertices < localPartVertexSize[i])
-			maxVertices = localPartVertexSize[i];
-	MPI_Allreduce(MPI_IN_PLACE, &maxVertices, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
+				// After sorting set the mpi index for the elements
+				for (int j = 0; j < static_cast<int>(it->second.size()); j++) {
+					apf::Downward f;
+					mesh->getDownward(it->second[j].element, 2, f);
+					mesh->setIntTag(f[it->second[j].localSide], mpiIndex, &j);
+				}
+			}
+		}
 
-	// Compute max number of boundaries per partition
-	unsigned int maxBoundaries = boundaryMaps[0].size();
-	for (unsigned int i = 1; i < nLocalPart; i++)
-		if (maxBoundaries < boundaryMaps[i].size())
-			maxBoundaries = boundaryMaps[i].size();
-	MPI_Allreduce(MPI_IN_PLACE, &maxBoundaries, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
+		logInfo(rank) << "Computing dimension sizes";
+		unsigned int maxSize[4] = {0, 0, 0, 0}; // elements, vertices, boundaries, boundary sizes
 
-	// Compute max boundary size
-	unsigned int maxBoundarySize = 0;
-	for (unsigned int i = 0; i < nLocalPart; i++) {
-		for (std::map<unsigned int, std::vector<MPINeighborElement> >::const_iterator j = boundaryMaps[i].begin();
-				j != boundaryMaps[i].end(); j++)
-			if (maxBoundarySize < j->second.size())
-				maxBoundarySize = j->second.size();
+		for (unsigned int i = 0; i < nLocalPart; i++) {
+			if (elemSize[i] > maxSize[0])
+				maxSize[0] = elemSize[i];
 
-	}
-	MPI_Allreduce(MPI_IN_PLACE, &maxBoundarySize, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
+			if (vertexMap[i].size() > maxSize[1])
+				maxSize[1] = vertexMap[i].size();
 
-	// Create element vertex buffer
-	unsigned int* localPartElemVrtx = new unsigned int[localPartPtr[nLocalPart]*4];
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++)
-		memcpy(&localPartElemVrtx[i*4], localPartElements[i].vertex, sizeof(unsigned int)*4);
+			if (boundaryMap[i].size() > maxSize[2])
+				maxSize[2] = boundaryMap[i].size();
 
-	// Create element group buffer
-	unsigned int* localPartElemGroup = new unsigned int[localPartPtr[nLocalPart]];
-	for (unsigned int i = 0; i < localPartPtr[nLocalPart]; i++)
-		localPartElemGroup[i] = localPartElements[i].group;
+			for (std::map<unsigned int, std::vector<MPINeighborElement> >::const_iterator it = boundaryMap[i].begin();
+					it != boundaryMap[i].end(); it++) {
+				if (it->second.size() > maxSize[3])
+					maxSize[3] = it->second.size();
+			}
+		}
 
-	logInfo(rank) << "Creating netCDF file";
-	// TODO create netCDF file with a new PUML format
-	int ncFile;
-	checkNcError(nc_create_par(outputFile.c_str(), NC_NETCDF4 | NC_MPIIO, MPI_COMM_WORLD, MPI_INFO_NULL, &ncFile));
+		MPI_Allreduce(MPI_IN_PLACE, maxSize, 4, MPI_UNSIGNED, MPI_MAX, commIO);
 
-	// Create netcdf dimensions
-	int ncDimDimension;
-	nc_def_dim(ncFile, "dimension", 3, &ncDimDimension);
+		logInfo(rank) << "Creating netCDF file";
+		// TODO create netCDF file with a new PUML format
+		int ncFile;
+		checkNcError(nc_create_par(outputFile.c_str(), NC_NETCDF4 | NC_MPIIO,
+				commIO, MPI_INFO_NULL, &ncFile));
 
-	int ncDimPart;
-	nc_def_dim(ncFile, "partitions", nPartitions, &ncDimPart);
+		// Create netcdf dimensions
+		int ncDimDimension;
+		nc_def_dim(ncFile, "dimension", 3, &ncDimDimension);
 
-	int ncDimElem, ncDimElemSides, ncDimElemVertices;
-	nc_def_dim(ncFile, "elements", maxPartSize, &ncDimElem);
-	nc_def_dim(ncFile, "element_sides", 4, &ncDimElemSides);
-	nc_def_dim(ncFile, "element_vertices", 4, &ncDimElemVertices);
+		int ncDimPart;
+		nc_def_dim(ncFile, "partitions", nPartitions, &ncDimPart);
 
-	int ncDimVrtx;
-	nc_def_dim(ncFile, "vertices", maxVertices, &ncDimVrtx);
+		int ncDimElem, ncDimElemSides, ncDimElemVertices;
+		nc_def_dim(ncFile, "elements", maxSize[0], &ncDimElem);
+		nc_def_dim(ncFile, "element_sides", 4, &ncDimElemSides);
+		nc_def_dim(ncFile, "element_vertices", 4, &ncDimElemVertices);
 
-	int ncDimBnd, ncDimBndElem;
-	nc_def_dim(ncFile, "boundaries", maxBoundaries, &ncDimBnd);
-	nc_def_dim(ncFile, "boundary_elements", maxBoundarySize, &ncDimBndElem);
+		int ncDimVrtx;
+		nc_def_dim(ncFile, "vertices", maxSize[1], &ncDimVrtx);
 
-	// Create netcdf variables
-	int ncVarElemSize;
-	checkNcError(nc_def_var(ncFile, "element_size", NC_INT, 1, &ncDimPart, &ncVarElemSize));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemSize, NC_COLLECTIVE));
+		int ncDimBnd, ncDimBndElem;
+		nc_def_dim(ncFile, "boundaries", maxSize[2], &ncDimBnd);
+		nc_def_dim(ncFile, "boundary_elements", maxSize[3], &ncDimBndElem);
 
-	int ncVarElemVertices;
-	int dimsElemVertices[] = {ncDimPart, ncDimElem, ncDimElemVertices};
-	checkNcError(nc_def_var(ncFile, "element_vertices", NC_INT, 3, dimsElemVertices, &ncVarElemVertices));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemVertices, NC_COLLECTIVE));
+		// Create netcdf variables
+		int ncVarElemSize;
+		checkNcError(nc_def_var(ncFile, "element_size", NC_INT, 1, &ncDimPart, &ncVarElemSize));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemSize, NC_COLLECTIVE));
 
-	int ncVarElemNeighbors;
-	int dimsElemSides[] = {ncDimPart, ncDimElem, ncDimElemSides};
-	checkNcError(nc_def_var(ncFile, "element_neighbors", NC_INT, 3, dimsElemSides, &ncVarElemNeighbors));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemNeighbors, NC_COLLECTIVE));
+		int ncVarElemVertices;
+		int dimsElemVertices[] = {ncDimPart, ncDimElem, ncDimElemVertices};
+		checkNcError(nc_def_var(ncFile, "element_vertices", NC_INT, 3, dimsElemVertices, &ncVarElemVertices));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemVertices, NC_COLLECTIVE));
 
-	int ncVarElemBoundaries;
-	checkNcError(nc_def_var(ncFile, "element_boundaries", NC_INT, 3, dimsElemSides, &ncVarElemBoundaries));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemBoundaries, NC_COLLECTIVE));
+		int ncVarElemNeighbors;
+		int dimsElemSides[] = {ncDimPart, ncDimElem, ncDimElemSides};
+		checkNcError(nc_def_var(ncFile, "element_neighbors", NC_INT, 3, dimsElemSides, &ncVarElemNeighbors));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemNeighbors, NC_COLLECTIVE));
 
-	int ncVarElemNeighborSides;
-	checkNcError(nc_def_var(ncFile, "element_neighbor_sides", NC_INT, 3, dimsElemSides, &ncVarElemNeighborSides));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemNeighborSides, NC_COLLECTIVE));
+		int ncVarElemBoundaries;
+		checkNcError(nc_def_var(ncFile, "element_boundaries", NC_INT, 3, dimsElemSides, &ncVarElemBoundaries));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemBoundaries, NC_COLLECTIVE));
 
-	int ncVarElemSideOrientations;
-	checkNcError(nc_def_var(ncFile, "element_side_orientations", NC_INT, 3, dimsElemSides, &ncVarElemSideOrientations));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemSideOrientations, NC_COLLECTIVE));
+		int ncVarElemNeighborSides;
+		checkNcError(nc_def_var(ncFile, "element_neighbor_sides", NC_INT, 3, dimsElemSides, &ncVarElemNeighborSides));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemNeighborSides, NC_COLLECTIVE));
 
-	int ncVarElemNeighborRanks;
-	checkNcError(nc_def_var(ncFile, "element_neighbor_ranks", NC_INT, 3, dimsElemSides, &ncVarElemNeighborRanks));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemNeighborRanks, NC_COLLECTIVE));
+		int ncVarElemSideOrientations;
+		checkNcError(nc_def_var(ncFile, "element_side_orientations", NC_INT, 3, dimsElemSides, &ncVarElemSideOrientations));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemSideOrientations, NC_COLLECTIVE));
 
-	int ncVarElemMPIIndices;
-	checkNcError(nc_def_var(ncFile, "element_mpi_indices", NC_INT, 3, dimsElemSides, &ncVarElemMPIIndices));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemMPIIndices, NC_COLLECTIVE));
+		int ncVarElemNeighborRanks;
+		checkNcError(nc_def_var(ncFile, "element_neighbor_ranks", NC_INT, 3, dimsElemSides, &ncVarElemNeighborRanks));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemNeighborRanks, NC_COLLECTIVE));
 
-	int ncVarElemGroup;
-	checkNcError(nc_def_var(ncFile, "element_group", NC_INT, 2, dimsElemSides, &ncVarElemGroup));
-	checkNcError(nc_var_par_access(ncFile, ncVarElemGroup, NC_COLLECTIVE));
+		int ncVarElemMPIIndices;
+		checkNcError(nc_def_var(ncFile, "element_mpi_indices", NC_INT, 3, dimsElemSides, &ncVarElemMPIIndices));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemMPIIndices, NC_COLLECTIVE));
 
-	int ncVarVrtxSize;
-	checkNcError(nc_def_var(ncFile, "vertex_size", NC_INT, 1, &ncDimPart, &ncVarVrtxSize));
-	checkNcError(nc_var_par_access(ncFile, ncVarVrtxSize, NC_COLLECTIVE));
+		int ncVarElemGroup;
+		checkNcError(nc_def_var(ncFile, "element_group", NC_INT, 2, dimsElemSides, &ncVarElemGroup));
+		checkNcError(nc_var_par_access(ncFile, ncVarElemGroup, NC_COLLECTIVE));
 
-	int ncVarVrtxCoords;
-	int dimsVrtxCoords[] = {ncDimPart, ncDimVrtx, ncDimDimension};
-	checkNcError(nc_def_var(ncFile, "vertex_coordinates", NC_DOUBLE, 3, dimsVrtxCoords, &ncVarVrtxCoords));
-	checkNcError(nc_var_par_access(ncFile, ncVarVrtxCoords, NC_COLLECTIVE));
+		int ncVarVrtxSize;
+		checkNcError(nc_def_var(ncFile, "vertex_size", NC_INT, 1, &ncDimPart, &ncVarVrtxSize));
+		checkNcError(nc_var_par_access(ncFile, ncVarVrtxSize, NC_COLLECTIVE));
 
-	int ncVarBndSize;
-	checkNcError(nc_def_var(ncFile, "boundary_size", NC_INT, 1, &ncDimPart, &ncVarBndSize));
-	checkNcError(nc_var_par_access(ncFile, ncVarBndSize, NC_COLLECTIVE));
+		int ncVarVrtxCoords;
+		int dimsVrtxCoords[] = {ncDimPart, ncDimVrtx, ncDimDimension};
+		checkNcError(nc_def_var(ncFile, "vertex_coordinates", NC_DOUBLE, 3, dimsVrtxCoords, &ncVarVrtxCoords));
+		checkNcError(nc_var_par_access(ncFile, ncVarVrtxCoords, NC_COLLECTIVE));
 
-	int ncVarBndElemSize;
-	int dimsBndElemSize[] = {ncDimPart, ncDimBnd};
-	checkNcError(nc_def_var(ncFile, "boundary_element_size", NC_INT, 2, dimsBndElemSize, &ncVarBndElemSize));
-	checkNcError(nc_var_par_access(ncFile, ncVarBndElemSize, NC_COLLECTIVE));
+		int ncVarBndSize;
+		checkNcError(nc_def_var(ncFile, "boundary_size", NC_INT, 1, &ncDimPart, &ncVarBndSize));
+		checkNcError(nc_var_par_access(ncFile, ncVarBndSize, NC_COLLECTIVE));
 
-	int ncVarBndElemRank;
-	checkNcError(nc_def_var(ncFile, "boundary_element_rank", NC_INT, 2, dimsBndElemSize, &ncVarBndElemRank));
-	checkNcError(nc_var_par_access(ncFile, ncVarBndElemRank, NC_COLLECTIVE));
+		int ncVarBndElemSize;
+		int dimsBndElemSize[] = {ncDimPart, ncDimBnd};
+		checkNcError(nc_def_var(ncFile, "boundary_element_size", NC_INT, 2, dimsBndElemSize, &ncVarBndElemSize));
+		checkNcError(nc_var_par_access(ncFile, ncVarBndElemSize, NC_COLLECTIVE));
 
-	int ncVarBndElemLocalIds;
-	int dimsBndElemLocalIds[] = {ncDimPart, ncDimBnd, ncDimBndElem};
-	checkNcError(nc_def_var(ncFile, "boundary_element_localids", NC_INT, 3, dimsBndElemLocalIds, &ncVarBndElemLocalIds));
-	checkNcError(nc_var_par_access(ncFile, ncVarBndElemLocalIds, NC_COLLECTIVE));
+		int ncVarBndElemRank;
+		checkNcError(nc_def_var(ncFile, "boundary_element_rank", NC_INT, 2, dimsBndElemSize, &ncVarBndElemRank));
+		checkNcError(nc_var_par_access(ncFile, ncVarBndElemRank, NC_COLLECTIVE));
 
-	checkNcError(nc_enddef(ncFile));
+		int ncVarBndElemLocalIds;
+		int dimsBndElemLocalIds[] = {ncDimPart, ncDimBnd, ncDimBndElem};
+		checkNcError(nc_def_var(ncFile, "boundary_element_localids", NC_INT, 3, dimsBndElemLocalIds, &ncVarBndElemLocalIds));
+		checkNcError(nc_var_par_access(ncFile, ncVarBndElemLocalIds, NC_COLLECTIVE));
 
-	logInfo(rank) << "Writing element data";
-	for (unsigned int i = 0; i < nMaxLocalPart; i++) {
-		unsigned int j = i % nLocalPart;
+		checkNcError(nc_enddef(ncFile));
 
-		size_t start[3] = {j + rank*nMaxLocalPart, 0, 0};
-		int size = localPartPtr[j+1]-localPartPtr[j];
-		checkNcError(nc_put_var1_int(ncFile, ncVarElemSize, start, &size));
-		size_t count[3] = {1, static_cast<size_t>(size), 4};
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemVertices, start, count, &localPartElemVrtx[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighbors, start, count, &localPartElemNb[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemBoundaries, start, count, &localPartElemBoundary[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemNeighborSides, start, count, &localPartElemNbSide[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemSideOrientations, start, count, &localPartElemNbOrient[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighborRanks, start, count, &localPartElemRanks[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemMPIIndices, start, count, &localPartElemMPI[localPartPtr[j]*4]));
-		checkNcError(nc_put_vara_uint(ncFile, ncVarElemGroup, start, count, &localPartElemGroup[localPartPtr[j]]));
-	}
+		// Buffers for I/O
+		unsigned int* elemVertices = new unsigned int[maxSize[0]*4];
+		int* elemNeighbors = new int[maxSize[0]*4];
+		int* elemBoundary = new int[maxSize[0]*4];
+		unsigned int* elemNbSide = new unsigned int[maxSize[0]*4];
+		unsigned int* elemOrientation = new unsigned int[maxSize[0]*4];
+		int* elemNbRank = new int[maxSize[0]*4];
+		int* elemMPIIndex = new int[maxSize[0]*4];
+		int* elemGroup = new int[maxSize[0]];
+		double* vertices = new double[maxSize[1]*3];
+		int* boundaryIds = new int[maxSize[3]];
 
-	// Delete data we have already written to disk
-	delete [] localPartElemVrtx;
-	delete [] localPartElemNb;
-	delete [] localPartElemNbSide;
-	delete [] localPartElemNbOrient;
-	delete [] localPartElemBoundary;
-	delete [] localPartElemRanks;
-	delete [] localPartElemMPI;
-	delete [] localPartElemGroup;
+		for (unsigned int i = 0; i < nMaxLocalPart; i++) {
+			logInfo(rank) << "Writing netCDF file part" << (i+1) << "of" << nMaxLocalPart;
 
-	MPI_Win_free(&elementWindow);
-	MPI_Win_free(&elementPartWindow);
-	MPI_Free_mem(elements);
-	MPI_Free_mem(elementPart);
-	delete [] localPartPtr;
-	delete [] localPartElements;
+			unsigned int j = i % nLocalPart;
 
-	// Load vertices
-	double* vertices;
-	MPI_Alloc_mem(mesh->nLocalVertices()*3*sizeof(double), MPI_INFO_NULL, &vertices);
-	mesh->getVertices(vertices);
+			// Elements
+			size_t start[3] = {j + rank*nMaxLocalPart, 0, 0};
+			checkNcError(nc_put_var1_uint(ncFile, ncVarElemSize, start, &elemSize[j]));
+			size_t count[3] = {1, static_cast<size_t>(elemSize[j]), 4};
 
-	// Create MPI window to get access to all vertices
-	MPI_Win verticesWindow;
-	MPI_Win_create(vertices, mesh->nLocalVertices()*3*sizeof(double),
-			sizeof(double), MPI_INFO_NULL, MPI_COMM_WORLD, &verticesWindow);
+			memset(elemBoundary, 0, elemSize[j]*4*sizeof(int));
+			memset(elemNbSide, 0, elemSize[j]*4*sizeof(unsigned int));
+			memset(elemOrientation, 0, elemSize[j]*4*sizeof(unsigned int));
+			memset(elemMPIIndex, 0, elemSize[j]*4*sizeof(int));
+			memset(elemGroup, 0, elemSize[j]*sizeof(int));
 
-	logInfo(rank) << "Writing vertices data";
-	double* localVertices = new double[maxVertices*3];
-	bool* localVerticesTransfered = new bool[maxVertices]; // True if we already have the corresponding vertex
-
-	for (unsigned int i = 0; i < nMaxLocalPart; i++) {
-		if (i < nLocalPart) {
-			// Only get the coordinates if this is a real partition
-			memset(localVerticesTransfered, 0, sizeof(bool)*maxVertices);
-
-			for (std::map<unsigned int, unsigned int>::const_iterator j = localPartVerticesMaps[i].begin();
-					j != localPartVerticesMaps[i].end(); j++)  {
-				// We already have this vertex?
-				if (localVerticesTransfered[j->second])
+			it = mesh->begin(3);
+			unsigned int k = 0;
+			while (apf::MeshEntity* element = mesh->iterate(it)) {
+				int part;
+				mesh->getIntTag(element, partitionTag, &part);
+				if (part % nMaxLocalPart != j)
 					continue;
 
-				// Get the vertices
-				MPI_Win_lock(MPI_LOCK_SHARED, mesh->rankOfVert(j->first), MPI_MODE_NOCHECK, verticesWindow);
-				MPI_Get(&localVertices[j->second*3], 3, MPI_DOUBLE,
-						mesh->rankOfVert(j->first), mesh->posOfVert(j->first)*3, 3, MPI_DOUBLE,
-						verticesWindow);
-				MPI_Win_unlock(mesh->rankOfVert(j->first), verticesWindow);
-				localVerticesTransfered[j->second] = true;
+				apf::NewArray<long> vn;
+				apf::getElementNumbers(vertexNum, element, vn);
+
+				apf::Downward vert;
+				mesh->getDownward(element, 0, vert);
+				for (unsigned int l = 0; l < 4; l++)
+					elemVertices[k*4 + l] = vertexMap[j][vert[l]];
+
+				apf::Downward faces;
+				mesh->getDownward(element, 2, faces);
+				for (unsigned int l = 0; l < 4; l++) {
+					if (mesh->isShared(faces[l])) {
+						// Partition boundary on another process
+						elemNeighbors[k*4 + FACE2INTERNAL[l]] = elemSize[j];
+
+						int info1[2];
+						mesh->getIntTag(faces[l], remoteInfo1, info1);
+						elemNbSide[k*4 + FACE2INTERNAL[l]] = FACE2INTERNAL[info1[1]];
+
+						long info2[2];
+						mesh->getLongTag(faces[l], remoteInfo2, info2);
+						elemOrientation[k*4 + FACE2INTERNAL[l]] = getOrientation(&vn[0], l, info2[1]);
+
+						elemNbRank[k*4 + FACE2INTERNAL[l]] = info1[0];
+
+						mesh->getIntTag(faces[l], mpiIndex, &elemMPIIndex[k*4 + FACE2INTERNAL[l]]);
+					} else {
+						apf::MeshEntity* n = getFaceElemOppositeElem(mesh, faces[l], element);
+
+						if (n == 0L) {
+							// Geometric boundary
+							elemNeighbors[k*4 + FACE2INTERNAL[l]] = elemSize[j];
+
+							elemNbRank[k*4 + FACE2INTERNAL[l]] = part;
+						} else {
+							int np;
+							mesh->getIntTag(n, partitionTag, &np);
+
+							if (np % nMaxLocalPart == j) {
+								// Same partition
+								mesh->getIntTag(n, localId, &elemNeighbors[k*4 + FACE2INTERNAL[l]]);
+							} else {
+								// Partition boundary on same process
+								elemNeighbors[k*4 + FACE2INTERNAL[l]] = elemSize[j];
+
+								mesh->getIntTag(faces[l], mpiIndex, &elemMPIIndex[k*4 + FACE2INTERNAL[l]]);
+							}
+
+							apf::Downward nf;
+							mesh->getDownward(n, 2, nf);
+							int nfId = apf::findIn(nf, 4, faces[l]);
+							elemNbSide[k*4 + FACE2INTERNAL[l]] = FACE2INTERNAL[nfId];
+
+							elemOrientation[k*4 + FACE2INTERNAL[l]] =
+									getOrientation(&vn[0], l, getFirstNumOfFace(vertexNum, n, nfId));
+
+							mesh->getIntTag(n, partitionTag, &elemNbRank[k*4 + FACE2INTERNAL[l]]);
+						}
+					}
+
+					if (boundaryTag && mesh->hasTag(faces[l], boundaryTag))
+						mesh->getIntTag(faces[l], boundaryTag, &elemBoundary[k*4 + FACE2INTERNAL[l]]);
+
+				}
+
+				if (groupTag && mesh->hasTag(element, groupTag))
+					mesh->getIntTag(element, groupTag, &elemGroup[k]);
+
+				k++;
+			}
+
+			checkNcError(nc_put_vara_uint(ncFile, ncVarElemVertices, start, count, elemVertices));
+			checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighbors, start, count, elemNeighbors));
+			checkNcError(nc_put_vara_int(ncFile, ncVarElemBoundaries, start, count, elemBoundary));
+			checkNcError(nc_put_vara_uint(ncFile, ncVarElemNeighborSides, start, count, elemNbSide));
+			checkNcError(nc_put_vara_uint(ncFile, ncVarElemSideOrientations, start, count, elemOrientation));
+			checkNcError(nc_put_vara_int(ncFile, ncVarElemNeighborRanks, start, count, elemNbRank));
+			checkNcError(nc_put_vara_int(ncFile, ncVarElemMPIIndices, start, count, elemMPIIndex));
+			checkNcError(nc_put_vara_int(ncFile, ncVarElemGroup, start, count, elemGroup));
+
+			// Vertices
+			unsigned int vertexSize = vertexMap[j].size();
+			checkNcError(nc_put_var1_uint(ncFile, ncVarVrtxSize, start, &vertexSize));
+			count[1] = vertexSize; count[2] = 3;
+			for (std::map<apf::MeshEntity*, unsigned int>::const_iterator it = vertexMap[j].begin();
+					it != vertexMap[j].end(); it++) {
+				apf::Vector3 point;
+				mesh->getPoint(it->first, 0, point);
+				point.toArray(&vertices[it->second*3]);
+			}
+			checkNcError(nc_put_vara_double(ncFile, ncVarVrtxCoords, start, count, vertices));
+
+			// Boundaries
+			int s = boundaryMap[j].size();
+			checkNcError(nc_put_var1_int(ncFile, ncVarBndSize, start, &s));
+
+			unsigned int bndCount = 0;
+			int size;	// need to declare them outside of the loop (to reuse last values during
+			int remoteRank;	// collective I/O)
+
+			count[0] = 1; count[1] = 1;
+			for (std::map<unsigned int, std::vector<MPINeighborElement> >::const_iterator it = boundaryMap[j].begin();
+					it != boundaryMap[j].end(); it++) {
+				start[1] = bndCount;
+
+				size = it->second.size();
+				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
+				remoteRank = it->first;
+				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
+
+				// Fill local ids
+				for (size_t k = 0; k < it->second.size(); k++)
+					mesh->getIntTag(it->second[k].element, localId, &boundaryIds[k]);
+
+				count[2] = size;
+				checkNcError(nc_put_vara_int(ncFile, ncVarBndElemLocalIds, start, count, boundaryIds));
+
+				bndCount++;
+			}
+
+			// For collective I/O
+			for (; bndCount < maxSize[3]; bndCount++) {
+				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
+				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
+
+				checkNcError(nc_put_vara_int(ncFile, ncVarBndElemLocalIds, start, count, boundaryIds));
 			}
 		}
 
-		// Writing is a collective operation. If we do not have enough partitions,
-		// we simply write the last one several times
-		unsigned int part = i;
-		if (i >= nLocalPart)
-			part = nLocalPart-1;
+		delete [] elemVertices;
+		delete [] elemNeighbors;
+		delete [] elemBoundary;
+		delete [] elemNbSide;
+		delete [] elemNbRank;
+		delete [] elemMPIIndex;
+		delete [] vertices;
+		delete [] boundaryIds;
 
-		// Write vertices to the file
-		size_t start[3] = {part + rank*nMaxLocalPart, 0, 0};
-		checkNcError(nc_put_var1_uint(ncFile, ncVarVrtxSize, start, &localPartVertexSize[part]));
-		size_t count[3] = {1, localPartVertexSize[part], 3};
-		checkNcError(nc_put_vara_double(ncFile, ncVarVrtxCoords, start, count, localVertices));
+		delete [] elemSize;
+		delete [] vertexMap;
+		delete [] boundaryMap;
+
+		checkNcError(nc_close(ncFile));
+
+		MPI_Comm_free(&commIO);
 	}
-
-	// Remove unused memory
-	delete [] localVertices;
-	delete [] localVerticesTransfered;
-
-	MPI_Win_free(&verticesWindow);
-	MPI_Free_mem(vertices);
-	delete [] localPartVerticesMaps;
-	delete [] localPartVertexSize;
-
-	logInfo(rank) << "Writing MPI boundary information";
-	// Write number of bondaries per partition first
-	for (unsigned int i = 0; i < nMaxLocalPart; i++) {
-		unsigned int j = i % nLocalPart;
-
-		size_t start[1] = {j + rank*nMaxLocalPart};
-		int size = boundaryMaps[j].size();
-		checkNcError(nc_put_var1_int(ncFile, ncVarBndSize, start, &size));
-	}
-
-	// Count max number of boundaries we have to write on each rank
-	maxBoundaries = 0;
-	for (unsigned int i = 0; i < nLocalPart; i++) {
-		maxBoundaries += boundaryMaps[i].size();
-	}
-	MPI_Allreduce(MPI_IN_PLACE, &maxBoundaries, 1, MPI_UNSIGNED, MPI_MAX, MPI_COMM_WORLD);
-
-	unsigned int* localBoundaryIds = new unsigned int[maxBoundarySize];
-	unsigned int boundariesDone = 0;
-	for (unsigned int i = 0; i < nLocalPart; i++) {
-		unsigned int curBoundary = 0;
-
-		for (std::map<unsigned int, std::vector<MPINeighborElement> >::const_iterator j = boundaryMaps[i].begin();
-				j != boundaryMaps[i].end(); j++) {
-
-			size_t start[3] = {i + rank*nMaxLocalPart, curBoundary, 0};
-			int size = j->second.size();
-			checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
-			int remoteRank = j->first;
-			checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
-
-			// Fill local ids
-			for (size_t k = 0; k < j->second.size(); k++) {
-				localBoundaryIds[k] = j->second[k].localElement;
-			}
-
-			size_t count[3] = {1, 1, static_cast<size_t>(size)};
-			checkNcError(nc_put_vara_uint(ncFile, ncVarBndElemLocalIds, start, count, localBoundaryIds));
-
-			boundariesDone++;
-			curBoundary++;
-		}
-	}
-
-	// For collective I/O
-	for (size_t k = 0; k < boundaryMaps[0].begin()->second.size(); k++) {
-		localBoundaryIds[k] = boundaryMaps[0].begin()->second[k].localElement;
-	}
-
-	for (unsigned int i = boundariesDone; i < maxBoundaries; i++) {
-		size_t start[3] = {0 + rank*nMaxLocalPart, 0, 0};
-		int size = boundaryMaps[0].begin()->second.size();
-		checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
-		int remoteRank = boundaryMaps[0].begin()->first;
-		checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
-
-		size_t count[3] = {1, 1, static_cast<size_t>(size)};
-		checkNcError(nc_put_vara_uint(ncFile, ncVarBndElemLocalIds, start, count, localBoundaryIds));
-	}
-
-	delete [] localBoundaryIds;
-	delete [] boundaryMaps;
-
-	delete mesh;
-
-	checkNcError(nc_close(ncFile));
 
 	logInfo(rank) << "Finished successfully";
 
