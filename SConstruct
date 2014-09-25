@@ -210,7 +210,7 @@ if env['parallelization'] in ['mpi']:
     env.tools.Program('#/'+env['execDir']+'/pumgen', env.sourceFiles['pumgen'])
 
 # build unit tests
-if env['unitTests'] != 'none':
+if env['unitTests']:
     
 
     # Some MPI version requires this flag
