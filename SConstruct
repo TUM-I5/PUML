@@ -211,7 +211,8 @@ if env['parallelization'] in ['mpi']:
 
 # build unit tests
 if env['unitTests']:
-    
+    # Use our own env for testing
+    env = env.Clone()
 
     # Some MPI version requires this flag
     if env['parallelization'] == 'mpi':
