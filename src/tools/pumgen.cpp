@@ -243,14 +243,14 @@ int main(int argc, char* argv[])
 	MPI_Allreduce(&nLocalElements, &nElements, 1, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
 
 	// Get element mapping
-    unsigned int* elemStart = new unsigned int[processes];
-    MPI_Scan(&nLocalElements, &elemStart[rank], 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
-    elemStart[rank] -= nLocalElements;
-    MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, elemStart, 1, MPI_UNSIGNED,
+	unsigned int* elemStart = new unsigned int[processes];
+	MPI_Scan(&nLocalElements, &elemStart[rank], 2, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
+	elemStart[rank] -= nLocalElements;
+	MPI_Allgather(MPI_IN_PLACE, 1, MPI_UNSIGNED, elemStart, 1, MPI_UNSIGNED,
     		MPI_COMM_WORLD);
 
-    // Create dual graph
-    logInfo(rank) << "Creating dual graph";
+	// Create dual graph
+	logInfo(rank) << "Creating dual graph";
 	int* dualGraph = apf::getElementToElement(mesh);
 
 	// Create the partitions
