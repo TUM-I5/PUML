@@ -224,6 +224,14 @@ int main(int argc, char* argv[])
 			gmi_write_dmg(mesh->getModel(), modelFile);
 	}
 
+	// Get local size
+	unsigned int nLocalElements = apf::countOwned(mesh, 3);
+
+	// Get global size
+	unsigned int nElements;
+	MPI_Allreduce(&nLocalElements, &nElements, 1, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
+	logInfo(rank) << "Mesh size:" << nElements;
+
 	// Compute min insphere radius
 	double min = std::numeric_limits<double>::max();
 	apf::MeshIterator* it = mesh->begin(3);
@@ -234,13 +242,6 @@ int main(int argc, char* argv[])
 	MPI_Reduce((rank == 0 ? MPI_IN_PLACE : &min),
 			&min, 1, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
 	logInfo(rank) << "Minimum insphere found:" << min;
-
-	// Get local size
-	unsigned int nLocalElements = apf::countOwned(mesh, 3);
-
-	// Get global size
-	unsigned int nElements;
-	MPI_Allreduce(&nLocalElements, &nElements, 1, MPI_UNSIGNED, MPI_SUM, MPI_COMM_WORLD);
 
 	// Get element mapping
 	unsigned int* elemStart = new unsigned int[processes];
