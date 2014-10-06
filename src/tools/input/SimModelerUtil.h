@@ -20,12 +20,15 @@
 #include "SimAttribute.h"
 #include "ModelTypes.h"
 
-/* The fields in this sturcture are set mainly based on the "Surface Meshing" and "Volume Meshing"
+/* The fields in this structure are set mainly based on the "Surface Meshing" and "Volume Meshing"
    attributes in the meshing case. */
 struct AdvMeshing_EXPORT MeshingOptions {
   bool surfaceRun;                // whether to run surface meshing
   bool surfaceDoFixIntersections; // whether to run fix self intersections
   bool surfaceDoCurve;            // whether to curve surface mesh
+  double proximityMeshSize;
+
+  int maxFaces, maxRegions; // abort surf/vol meshing if these max numbers are exceeded
 
   // These correspond as indicated to the fields in the "Surface Meshing" attribute
   int surfaceSmoothingLevel;      // "Smoothing Level"
