@@ -65,12 +65,12 @@ public:
 			const char* logFile = 0L)
 	{
 		// Init SimModSuite
+		SimPartitionedMesh_start(0L, 0L);
 		if (logFile) {
 			m_log = true;
 			Sim_logOn(logFile);
 		} else
 			m_log = false;
-		SimPartitionedMesh_start(0L, 0L);
 		Sim_readLicenseFile(licenseFile);
 		MS_init();
 		SimParasolid_start(1);
@@ -185,9 +185,9 @@ public:
 		SimParasolid_stop(1);
 		MS_exit();
 		Sim_unregisterAllKeys();
-		SimPartitionedMesh_stop();
 		if (m_log)
 			Sim_logOff();
+		SimPartitionedMesh_stop();
 	}
 
 private:
