@@ -242,7 +242,7 @@ private:
 
 	static void progressHandler(const char* what, int level, int startVal, int endVal, int currentVal, void *ignore)
 	{
-		if (PMU_rank() != 0 || level >= 2)
+		if (PMU_rank() != 0)
 			return;
 
 		switch (level) {
@@ -258,6 +258,8 @@ private:
 			else
 				progressBar.increment();
 			break;
+		default:
+			progressBar.update();
 		}
 
 		logDebug() << what << level << startVal << endVal << currentVal;
