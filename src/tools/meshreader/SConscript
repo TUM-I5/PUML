@@ -13,6 +13,8 @@
 
 Import('env')
 
-env.sourceFiles['pumgen'].append(env.tools.Object('GambitReader.cpp'))
+env.sourceFiles['pumgen'].extend([
+    env.tools.Object('GambitReader.cpp'),
+    env.tools.Object('FidapReader.cpp')])
 
 Export('env')

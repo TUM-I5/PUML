@@ -37,6 +37,7 @@
 #include "input/SimModSuite.h"
 #endif // USE_SIMMOD
 #include "meshreader/ParallelGambitReader.h"
+#include "meshreader/ParallelFidapReader.h"
 
 const static unsigned int FACE2INTERNAL[] = {0, 1, 3, 2};
 
@@ -134,7 +135,7 @@ int main(int argc, char* argv[])
 
 	// Parse command line arguments
 	utils::Args args;
-	const char* source[] = {"gambit", "apf", "simmodsuite"};
+	const char* source[] = {"gambit", "fidap", "apf", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
 	args.addOption("dump", 'd', "Dump APF mesh before partitioning it",
 			utils::Args::Required, false);
@@ -185,11 +186,15 @@ int main(int argc, char* argv[])
 		meshInput = new SerialMeshFile<ParallelGambitReader>(inputFile);
 		break;
 	case 1:
+		logInfo(rank) << "Using Fidap mesh";
+		meshInput = new SerialMeshFile<ParallelFidapReader>(inputFile);
+		break;
+	case 2:
 		logInfo(rank) << "Using APF native format";
 		meshInput = new ApfNative(inputFile,
 				args.getArgument<const char*>("model", 0L));
 		break;
-	case 2:
+	case 3:
 #ifdef USE_SIMMOD
 		logInfo(rank) << "Using SimModSuite";
 

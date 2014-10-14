@@ -21,6 +21,8 @@
 #include "utils/stringutils.h"
 #include "utils/logger.h"
 
+#include "MeshReader.h"
+
 /**
  * Describes the group of an element
  */
@@ -35,7 +37,7 @@ struct ElementGroup
 /**
  * Describes a boundary face
  */
-struct BoundaryFace
+struct GambitBoundaryFace
 {
 	/** The element the face belongs to */
 	unsigned int element;
@@ -45,33 +47,24 @@ struct BoundaryFace
 	int type;
 };
 
-class GambitReader
+class GambitReader : public MeshReader
 {
 private:
-	struct GambitSection {
-		/** Start of the section */
-		size_t seekPosition;
-		/** Number of elements (lines) in the section */
-		unsigned int nLines;
-		/** Line size */
-		size_t lineSize;
-	};
-
-	struct ElementSection : GambitSection {
+	struct ElementSection : FileSection {
 		/** Start of vertices in an element */
 		size_t vertexStart;
 		/** Size per vertex id */
 		size_t vertexSize;
 	};
 
-	struct GroupSection : GambitSection {
+	struct GroupSection : FileSection {
 		/** Size per element id */
 		size_t elementSize;
 		/** Group number */
 		int group;
 	};
 
-	struct BoundarySection : GambitSection {
+	struct BoundarySection : FileSection {
 		/** Type of the boundary */
 		int type;
 		/** Size per element id (only fixed line length) */
@@ -84,31 +77,16 @@ private:
 		bool variableLineLength;
 	};
 
-	std::ifstream m_mesh;
-
 	// Section descriptions
-	GambitSection m_vertices;
+	FileSection m_vertices;
 	ElementSection m_elements;
 	std::vector<GroupSection> m_groups;
 	std::vector<BoundarySection> m_boundaries;
 
 public:
-	GambitReader()
-	{
-	}
-
-	GambitReader(const char* meshFile)
-	{
-		open(meshFile);
-	}
-
 	void open(const char* meshFile)
 	{
-		m_mesh.open(meshFile);
-
-		// Files are readable?
-		if (!m_mesh)
-			logError() << "Could not open mesh file" << meshFile;
+		MeshReader::open(meshFile);
 
 		std::string line;
 
@@ -128,7 +106,6 @@ public:
 								// PROGRAM: Gambit VERSION: x.y.z
 
 		getline(m_mesh, line);		// Date
-		//trim(line);
 
 		getline(m_mesh, line); 	// Skip problem size names
 
@@ -305,9 +282,6 @@ public:
 		return m_elements.nLines;
 	}
 
-	/**
-	 * @return Number of boundary faces
-	 */
 	unsigned int nBoundaries() const
 	{
 		unsigned int count = 0;
@@ -320,10 +294,7 @@ public:
 	}
 
 	/**
-	 * Reads vertices from start tp start+count from the file and stores them in vertices
-	 *
-	 * @param vertices Buffer to store coordinates of each vertex. The caller is responsible
-	 *  for allocating the buffer. The size of the buffer must be count*dimensions
+	 * @copydoc MeshReader::readVertices(unsigned int, unsigned int, double*)
 	 *
 	 * @todo Only 3 dimensional meshes are supported
 	 */
@@ -351,22 +322,7 @@ public:
 	}
 
 	/**
-	 * Read all vertices
-	 *
-	 * @see readVertices(unsigned int, unsigned int, double*)
-	 */
-	void readVertices(double* vertices)
-	{
-		logInfo() << "Reading vertices";
-
-		readVertices(0, nVertices(), vertices);
-	}
-
-	/**
-	 * Reads elements from start to start+count from the file and stores them in elements
-	 *
-	 * @param elements Buffer to store vertices of each element. The caller is responsible
-	 *  for allocating the buffer. The Size of the buffer must be count*vertices_per_element.
+	 * @copydoc MeshReader::readElements(unsigned int, unsigned int, int*)
 	 *
 	 * @todo Only tetrahedral meshes are supported
 	 * @todo Support for varying coordinate/vertexid fields
@@ -392,17 +348,6 @@ public:
 		}
 
 		delete [] buf;
-	}
-
-	/**
-	 * Reads all elements
-	 *
-	 * @see readElements(unsigned int, unsigned int, unsinged int*)
-	 */
-	void readElements(int* elements)
-	{
-		logInfo() << "Reading elements";
-		readElements(0, nElements(), elements);
 	}
 
 	/**
@@ -478,7 +423,7 @@ public:
 	 * @param elements Buffer to store boundaries. Each boundary consists of the element, the
 	 *  face and the boundary type.
 	 */
-	void readBoundaries(unsigned int start, unsigned int count, BoundaryFace* boundaries)
+	void readBoundaries(unsigned int start, unsigned int count, GambitBoundaryFace* boundaries)
 	{
 		m_mesh.clear();
 
@@ -560,7 +505,7 @@ public:
 		logInfo() << "Reading boundary conditions";
 
 		unsigned int nBnds = nBoundaries();
-		BoundaryFace* faces = new BoundaryFace[nBoundaries()];
+		GambitBoundaryFace* faces = new GambitBoundaryFace[nBoundaries()];
 		readBoundaries(0, nBnds, faces);
 
 		for (unsigned int i = 0; i < nBnds; i++)
