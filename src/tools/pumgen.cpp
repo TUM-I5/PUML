@@ -136,9 +136,11 @@ int main(int argc, char* argv[])
 	utils::Args args;
 	const char* source[] = {"gambit", "apf", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
-	args.addOption("dump", 'd', "Dump the mesh before partitioning it",
+	args.addOption("dump", 'd', "Dump APF mesh before partitioning it",
 			utils::Args::Required, false);
 	args.addOption("model", 0, "Dump/Load a specific model file",
+			utils::Args::Required, false);
+	args.addOption("vtk", 0, "Dump mesh to VTK files",
 			utils::Args::Required, false);
 	args.addOption("license", 'l', "License file (only used by SimModSuite)",
 			utils::Args::Required, false);
@@ -222,6 +224,13 @@ int main(int argc, char* argv[])
 		const char* modelFile = args.getArgument<const char*>("model", 0L);
 		if (modelFile)
 			gmi_write_dmg(mesh->getModel(), modelFile);
+	}
+
+	// Dump VTK mesh
+	const char* vtkPrefix = args.getArgument<const char*>("vtk", 0L);
+	if (vtkPrefix) {
+		logInfo(PCU_Comm_Self()) << "Writing VTK mesh";
+		apf::writeVtkFiles(vtkPrefix, mesh);
 	}
 
 	// Get local size
