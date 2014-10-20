@@ -225,7 +225,7 @@ public:
 				element.nLines = sec.nLines;
 				element.lineSize = sec.lineSize;
 
-				element.group = i;
+				element.group = m_elements.size() + 1;
 
 				m_elements.push_back(element);
 				break;
