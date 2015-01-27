@@ -22,7 +22,7 @@ class ParallelGambitReader : public ParallelMeshReader<GambitReader>
 {
 public:
 	ParallelGambitReader(MPI_Comm comm = MPI_COMM_WORLD)
-		: ParallelMeshReader(comm)
+		: ParallelMeshReader<GambitReader>(comm)
 	{
 	}
 

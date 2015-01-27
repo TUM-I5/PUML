@@ -28,7 +28,7 @@ private:
 
 public:
 	ParallelFidapReader(MPI_Comm comm = MPI_COMM_WORLD)
-		: ParallelMeshReader(comm)
+		: ParallelMeshReader<FidapReader>(comm)
 	{
 	}
 
