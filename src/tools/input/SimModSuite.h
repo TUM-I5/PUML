@@ -258,8 +258,6 @@ private:
 			else
 				progressBar.increment();
 			break;
-		default:
-			progressBar.update();
 		}
 
 		logDebug() << what << level << startVal << endVal << currentVal;
