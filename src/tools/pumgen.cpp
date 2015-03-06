@@ -122,11 +122,7 @@ int main(int argc, char* argv[])
 	int processes = 1;
 
 	int threadSupport;
-	MPI_Init_thread(&argc, &argv, MPI_THREAD_SINGLE, &threadSupport);
-
-	if (threadSupport != MPI_THREAD_SINGLE)
-		// I'm not sure yet if we really need thread support
-		logError() << "Threading is not supported in this MPI version";
+	MPI_Init(&argc, &argv);
 
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &processes);
