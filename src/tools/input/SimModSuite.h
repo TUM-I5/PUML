@@ -33,6 +33,7 @@
 #include <SimMeshingErrorCodes.h>
 
 #include "utils/logger.h"
+#include "utils/path.h"
 #include "utils/progress.h"
 
 #include "MeshInput.h"
@@ -85,10 +86,14 @@ public:
 			sCadFile = modFile;
 			utils::StringUtils::replaceLast(sCadFile, ".smd", "_nat.x_t");
 		}
-		pNativeModel nativeModel = ParasolidNM_createFromFile(sCadFile.c_str(), 0);
+		pNativeModel nativeModel = 0L;
+		if (utils::Path(sCadFile).exists())
+			nativeModel = ParasolidNM_createFromFile(sCadFile.c_str(), 0);
 
 		m_model = GM_load(modFile, nativeModel, 0L);
-		NM_release(nativeModel);
+
+		if (nativeModel)
+			NM_release(nativeModel);
 
         // check for model errors
         pPList modelErrors = PList_new();
