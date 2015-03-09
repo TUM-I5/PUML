@@ -121,7 +121,6 @@ int main(int argc, char* argv[])
 	int rank = 0;
 	int processes = 1;
 
-	int threadSupport;
 	MPI_Init(&argc, &argv);
 
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
