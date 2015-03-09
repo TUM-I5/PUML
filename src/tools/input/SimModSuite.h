@@ -25,6 +25,7 @@
 #include <apfSIM.h>
 #include <gmi_sim.h>
 
+#include <SimDiscrete.h>
 #include <SimParasolidKrnl.h>
 #include <MeshSim.h>
 #include <SimPartitionedMesh.h>
@@ -74,6 +75,7 @@ public:
 			m_log = false;
 		Sim_readLicenseFile(licenseFile);
 		MS_init();
+		SimDiscrete_start(0);
 		SimParasolid_start(1);
 		Sim_setMessageHandler(messageHandler);
 
@@ -188,6 +190,7 @@ public:
 
 		// Finalize SimModSuite
 		SimParasolid_stop(1);
+		SimDiscrete_stop(0);
 		MS_exit();
 		Sim_unregisterAllKeys();
 		if (m_log)
