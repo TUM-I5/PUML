@@ -146,6 +146,8 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
 			utils::Args::Required, false);
+	args.addOption("stl", 0, "Use STL-input with hard-coded parameters",
+			utils::Args::No, false);
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
 	args.addAdditionalOption("input", "Input file (mesh or model)");
@@ -198,7 +200,8 @@ int main(int argc, char* argv[])
 				args.getArgument<const char*>("license", 0L),
 				args.getArgument<const char*>("mesh", "mesh"),
 				args.getArgument<const char*>("analysis", "analysis"),
-				args.getArgument<int>("enforce-size", 0));
+				args.getArgument<int>("enforce-size", 0),
+				args.isSet("stl"));
 
 #else // USE_SIMMOD
 		logError() << "SimModSuite is not supported in this version";
