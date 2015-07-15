@@ -6,7 +6,7 @@
  *  notice in the file 'COPYING' at the root directory of this package
  *  and the copyright notice at https://github.com/TUM-I5/PUML
  *
- * @copyright 2014 Technische Universitaet Muenchen
+ * @copyright 2014-2015 Technische Universitaet Muenchen
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  * @author Johannes Klicpera <johannes.klicpera@tum.de>
  */
@@ -18,6 +18,7 @@
  #include <algorithm>
  #include <cassert>
  #include <cstring>
+ #include <iostream>
 
  #include <apf.h>
  #include <apfMDS.h>
@@ -30,6 +31,7 @@
 #include <SimError.h>
 #include <SimErrorCodes.h>
 #include <SimMeshingErrorCodes.h>
+#include <SimMeshTools.h>
 
 #include "utils/logger.h"
 #include "utils/path.h"
@@ -84,7 +86,7 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
     m_simMesh = PM_new(0, m_model, PMU_size());
 
     pProgress prog = Progress_new();
-    Progress_setCallback(prog, progressHandler);
+    // Progress_setCallback(prog, progressHandler);
 
     logInfo(PMU_rank()) << "Starting the surface mesher";
     pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
@@ -102,6 +104,11 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
     VolumeMesher_delete(volumeMesher);
 
     Progress_delete(prog);
+
+    // Get information about the mesh
+    if (stlInput) {
+        analyse_mesh();
+    }
 
     // Convert to APF mesh
     apf::Mesh* tmpMesh = apf::createMesh(m_simMesh);
@@ -339,7 +346,7 @@ void SimModSuite::loadSTL(const char *filename){
         return;
     }
 
-    // create the Discrete model
+    // create the discrete model
     d_model = DM_createFromMesh(mesh, 1, 0L);
     if(!d_model) { //check for error
         logError() << "Error creating Discrete model from mesh";
@@ -347,7 +354,7 @@ void SimModSuite::loadSTL(const char *filename){
         return;
     }
 
-    // define the Discrete model
+    // define the discrete model
     DM_findEdgesByFaceNormalsDegrees(d_model, 70, 0L);
     DM_eliminateDanglingEdges(d_model, 0L);
     if(DM_completeTopology(d_model, 0L)) { //check for error
@@ -394,4 +401,28 @@ void SimModSuite::loadCAD(const char* modFile, const char* cadFile){
             // TODO print more detail about errors
             logError() << "Input model is not valid";
     PList_delete(modelErrors);
+}
+
+void SimModSuite::analyse_mesh() {
+    int num_bins = 10;
+    int bins[num_bins];
+    memset(bins, 0, num_bins*sizeof(int));
+
+    // Accumulate data
+    RIter reg_it;
+    int num_partMeshes = PM_numParts(m_simMesh);
+    pRegion reg;
+    for(int i = 0; i < num_partMeshes; i++) {
+        reg_it = M_regionIter(PM_mesh(m_simMesh, i));
+        while (reg = RIter_next(reg_it)) {
+            bins[(int)(R_equivolumeSkewness(reg) * num_bins)]++; // because skewness lies in [0,1]
+        }
+    }
+    RIter_delete(reg_it);
+
+    // Print the statistics
+    logInfo(PMU_rank()) << "Skewness statistics:" << std::fixed << std::setprecision(1);
+    for(int i = 0; i < num_bins; i++) {
+        logInfo(PMU_rank()) << "[" << i * 1.0 / num_bins << "," << (i + 1) * 1.0 / num_bins << "):" << bins[i];
+    }
 }

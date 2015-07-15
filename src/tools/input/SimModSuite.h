@@ -59,6 +59,7 @@ private:
 	void loadSTL(const char *filename);
 	void extractCases(pGModel m_model, pACase &meshCase, const char *meshCaseName, pACase &analysisCase, const char *analysisCaseName);
 	void setCases(pGModel model, pACase &meshCase, pACase &analysisCase);
+	void analyse_mesh();
 };
 
 #endif // SIM_MOD_SUITE_H
