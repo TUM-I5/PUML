@@ -19,6 +19,10 @@
  #include <cassert>
  #include <cstring>
  #include <iostream>
+ #include <fstream>
+ #include <string>
+ #include <sstream>
+ #include <vector>
 
  #include <apf.h>
  #include <apfMDS.h>
@@ -32,6 +36,7 @@
 #include <SimErrorCodes.h>
 #include <SimMeshingErrorCodes.h>
 #include <SimMeshTools.h>
+#include <SimDisplay.h>
 
 #include "utils/logger.h"
 #include "utils/path.h"
@@ -48,7 +53,8 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
         const char* meshCaseName,
         const char* analysisCaseName,
         int enforceSize,
-        const bool stlInput,
+        const char* stl_ParFile,
+        const bool probe_faces,
         const char* logFile)
 {
 
@@ -68,16 +74,21 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
     // Load file
     logInfo(PMU_rank()) << "Loading model";
 
-    if(stlInput) {
+    if(stl_ParFile != NULL) {
         loadSTL(modFile);
     } else {
         loadCAD(modFile, cadFile);
     }
 
+    // Probe faces
+    if(probe_faces) {
+        probeFaceCoords(m_model);
+    }
+
     // Extract cases
     pACase meshCase, analysisCase;
-    if(stlInput) {
-        setCases(m_model, meshCase, analysisCase);
+    if(stl_ParFile != NULL) {
+        setCases(m_model, meshCase, analysisCase, stl_ParFile);
     } else {
         extractCases(m_model, meshCase, meshCaseName, analysisCase, analysisCaseName);
     }
@@ -106,7 +117,7 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
     Progress_delete(prog);
 
     // Get information about the mesh
-    if (stlInput) {
+    if (stl_ParFile != NULL) {
         analyse_mesh();
     }
 
@@ -250,7 +261,79 @@ void SimModSuite::extractCases(pGModel m_model, pACase &meshCase, const char *me
     PList_delete(children);
 }
 
-void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase) {
+std::vector<std::string> &split(std::vector<std::string> &elems, const std::string &s, char delim) {
+    std::stringstream ss(s);
+    std::string item;
+    while (std::getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
+
+void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase, const char* stl_ParFile) {
+
+    //Read settings from 'setCases.par'-file
+    // Format:
+    // 1st line: Boundary conditions comma-separated (values: 'freeSurface'=1, 'dynamicRupture'=3, 'absorbing'=5)
+    // 2nd line: global mesh size
+    // 3rd line: mesh size on fault
+    // 4th line: Gradation rate
+    // 5th line: Target equivolume skewness
+    // 5th line: Target equiarea skewness on fault
+    std::ifstream casefile(stl_ParFile);
+    std::string line;
+    int numFaces = GM_numFaces(model);
+    int * faceBound = new int[numFaces];
+    double globalMSize, faultMSize, gradation, vol_skewness, area_skewness;
+    if (casefile.is_open()) {
+
+        // Boundary conditions
+        getline(casefile, line);
+        std::vector<std::string> tokens;
+        split(tokens, line, ',');
+        for(int i = 0; i < numFaces; i++) {
+            if (i < tokens.size()) {
+                if ( 0 == tokens[i].compare("freeSurface")) {
+                    faceBound[i] = 1;
+                } else if ( 0 == tokens[i].compare("dynamicRupture")) {
+                    faceBound[i] = 3;
+                } else if ( 0 == tokens[i].compare("absorbing")) {
+                    faceBound[i] = 5;
+                } else {
+                    logError() << "Unrecognised boundary type in file" << stl_ParFile;
+                    return;
+                }
+            } else {
+                faceBound[i] = 5;
+            }
+        }
+
+        // Meshing parameters
+        try {
+            getline(casefile, line);
+            globalMSize = std::strtod(line.c_str(), NULL);
+
+            getline(casefile, line);
+            faultMSize = std::strtod(line.c_str(), NULL);
+
+            getline(casefile, line);
+            gradation = std::strtod(line.c_str(), NULL);
+
+            getline(casefile, line);
+            vol_skewness = std::strtod(line.c_str(), NULL);
+
+            getline(casefile, line);
+            area_skewness = std::strtod(line.c_str(), NULL);
+        } catch(...) {
+            logError() << "Error during parameter parsing from file" << stl_ParFile;
+            return;
+        }
+
+        casefile.close();
+    } else {
+        logError() << "Unable to open file" << stl_ParFile;
+        return;
+    }
 
     logInfo(PMU_rank()) << "Setting cases";
     // ------------------------------ Set boundary conditions ------------------------------
@@ -289,25 +372,30 @@ void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase
     pModelAssoc aAbsorb = AttCase_newModelAssoc(analysisCase,(pANode)iAbsorb);
 
     pGEntity face;
-    for (int i = 1; i <= 7; i++) {
+    for (int i = 0; i < numFaces; i++) {
         // Get the face
-        face = GM_entityByTag(model, 2, i);
+        face = GM_entityByTag(model, 2, i + 1);
 
         // Add the face to the model association. Note that we passed
         // the Attribute Information Node into the Model Association
         // at the time when the Model Association was created. That prepares
         // the creation of the AttributeVoid on the face as soon as the
         // association process is started
-        if (i == 6) {
-            AMA_addGEntity(aSurf,face);
-        } else if (i == 7) {
-            AMA_addGEntity(aDynRup,face);
-        } else {
-            AMA_addGEntity(aAbsorb,face);
+        logInfo(PMU_rank()) << "faceBound[" << i + 1 <<"] =" << faceBound[i];
+        switch (faceBound[i]) {
+            case 1:
+                AMA_addGEntity(aSurf,face);
+                break;
+            case 3:
+                AMA_addGEntity(aDynRup,face);
+                break;
+            case 5:
+                AMA_addGEntity(aAbsorb,face);
+                break;
+            default:
+                logError() << "Unrecognised boundary type integer";
         }
     }
-
-    // printFaceCoords(model);
 
     // ------------------------------ Set meshing parameters ------------------------------
 
@@ -315,18 +403,35 @@ void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase
 
     // Set global mesh size
     pModelItem modelDomain = GM_domain(model);
+    logInfo(PMU_rank()) << "globalMSize =" << globalMSize;
     // ( <meshing case>, <entity>, <1=absolute, 2=relative>, <size>, <size expression> )
-    MS_setMeshSize(meshCase, modelDomain, 1, 5000, NULL);
+    MS_setMeshSize(meshCase, modelDomain, 1, globalMSize, NULL);
 
     // Set mesh size on fault
-    face = GM_entityByTag(model, 2, 7);
-    MS_setMeshSize(meshCase, face, 1, 400, NULL);
+    logInfo(PMU_rank()) << "faultMSize =" << faultMSize;
+    for (int i = 0; i < numFaces; i++) {
+        if(faceBound[i] == 3) {
+            face = GM_entityByTag(model, 2, i + 1);
+            MS_setMeshSize(meshCase, face, 1, faultMSize, NULL);
+        }
+    }
 
     // Set gradation relative
-    MS_setGlobalSizeGradationRate(meshCase, 0.2);
+    logInfo(PMU_rank()) << "Gradation rate =" << gradation;
+    MS_setGlobalSizeGradationRate(meshCase, gradation);
 
-    // Set target skewness
-    MS_setVolumeShapeMetric(meshCase, modelDomain, ShapeMetricType_Skewness, 0.75);
+    // Set target equivolume skewness
+    logInfo(PMU_rank()) << "Target equivolume skewness =" << vol_skewness;
+    MS_setVolumeShapeMetric(meshCase, modelDomain, ShapeMetricType_Skewness, vol_skewness);
+
+    // Set target equiarea skewness on fault
+    logInfo(PMU_rank()) << "Target equiarea skewness on fault =" << area_skewness;
+    for (int i = 0; i < numFaces; i++) {
+        if(faceBound[i] == 3) {
+            face = GM_entityByTag(model, 2, i + 1);
+            MS_setSurfaceShapeMetric(meshCase, face, ShapeMetricType_Skewness, area_skewness);
+        }
+    }
 }
 
 void SimModSuite::loadSTL(const char *filename){
@@ -405,24 +510,87 @@ void SimModSuite::loadCAD(const char* modFile, const char* cadFile){
 
 void SimModSuite::analyse_mesh() {
     int num_bins = 10;
-    int bins[num_bins];
-    memset(bins, 0, num_bins*sizeof(int));
+    int skew_vol_bins[num_bins];
+    int skew_area_bins[num_bins];
+    memset(skew_vol_bins, 0, num_bins*sizeof(int));
+    memset(skew_area_bins, 0, num_bins*sizeof(int));
 
-    // Accumulate data
+    // Accumulate equivolume skewness data
     RIter reg_it;
     int num_partMeshes = PM_numParts(m_simMesh);
     pRegion reg;
     for(int i = 0; i < num_partMeshes; i++) {
         reg_it = M_regionIter(PM_mesh(m_simMesh, i));
         while (reg = RIter_next(reg_it)) {
-            bins[(int)(R_equivolumeSkewness(reg) * num_bins)]++; // because skewness lies in [0,1]
+            skew_vol_bins[(int)(R_equivolumeSkewness(reg) * num_bins)]++; // because skewness lies in [0,1]
         }
     }
     RIter_delete(reg_it);
 
-    // Print the statistics
-    logInfo(PMU_rank()) << "Skewness statistics:" << std::fixed << std::setprecision(1);
-    for(int i = 0; i < num_bins; i++) {
-        logInfo(PMU_rank()) << "[" << i * 1.0 / num_bins << "," << (i + 1) * 1.0 / num_bins << "):" << bins[i];
+    // Accumulate equiarea skewness data
+    FIter face_it;
+    pFace face;
+    for(int i = 0; i < num_partMeshes; i++) {
+        face_it = M_faceIter(PM_mesh(m_simMesh, i));
+        while (face = FIter_next(face_it)) {
+            skew_area_bins[(int)(F_equiareaSkewness(face) * num_bins)]++; // because skewness lies in [0,1]
+        }
     }
+    FIter_delete(face_it);
+
+    // Print the statistics
+    logInfo(PMU_rank()) << "Skewness statistics:";
+    logInfo(PMU_rank()) << "Equivolume skewness (target: < 0.9):";
+    for(int i = 0; i < num_bins; i++) {
+        logInfo(PMU_rank()) << std::fixed << std::setprecision(2) << "[" << i * 1.0 / num_bins << "," << (i + 1) * 1.0 / num_bins << "):" << skew_vol_bins[i];
+    }
+    logInfo(PMU_rank()) << "Equiarea skewness (target: < 0.8):";
+    for(int i = 0; i < num_bins; i++) {
+        logInfo(PMU_rank()) << std::fixed << std::setprecision(2) << "[" << i * 1.0 / num_bins << "," << (i + 1) * 1.0 / num_bins << "):" << skew_area_bins[i];
+    }
+}
+
+// Method for probing the locations of the model faces to facilitate parameter setup
+void SimModSuite::probeFaceCoords(pGModel model) {
+    GFIter modelFaces;
+    pGFace modelFace;
+    int ID;
+    pPList edgeList;  // Edges bounding a face
+    pGEdge thisEdge;
+    pSimPolygons poly; // tessellation of a face
+    const int maxPolyPoints = 100;
+    int polypoint[maxPolyPoints];   // ID of the points of a polygon
+    double pntlocation[3];
+    double pntnormal[3];
+    modelFaces = GM_faceIter(model);
+    logInfo(PMU_rank()) << "Face information:";
+    while(modelFace=GFIter_next(modelFaces)) { // get the next model face
+
+        ID = GEN_tag(modelFace);
+        poly = GF_displayRep(modelFace);
+        int npolys = SimPolygons_numPolys(poly);
+        int npolypnts = SimPolygons_numPoints(poly);
+        logInfo(PMU_rank()) << "There are" << npolys << "polygons and" << npolypnts << "points on model face" << ID << ", e.g.:";
+
+        int j;
+        for (j=0; j<1; j++) { // loop over the polygons
+
+            int myPoints = SimPolygons_polySize(poly, j);
+            SimPolygons_poly(poly, j, polypoint);
+
+            std::stringstream polygon_str;
+            polygon_str << "Polygon " << j << " has the following points:";
+            int k;
+            for (k=0; k<myPoints; k++)
+                polygon_str << " " << polypoint[k];
+            logInfo(PMU_rank()) << polygon_str.str().c_str();
+
+            for (k=0; k<myPoints; k++) {
+                int hasnorm = SimPolygons_pointData(poly, polypoint[k], pntlocation, pntnormal);
+                logInfo(PMU_rank()) << " Point" << polypoint[k] << ": (" << pntlocation[0] << "," << pntlocation[1] << "," << pntlocation[2] << ")";
+            }
+        }
+        SimPolygons_delete(poly); // cleanup
+    }
+    GFIter_delete(modelFaces); // cleanup
 }

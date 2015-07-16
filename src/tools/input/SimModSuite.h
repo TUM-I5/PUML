@@ -44,7 +44,8 @@ public:
 			const char* meshCaseName = "mesh",
 			const char* analysisCaseName = "analysis",
 			int enforceSize = 0,
-			const bool stlInput = false,
+			const char* stl_ParFile = 0L,
+			const bool probe_faces = false,
 			const char* logFile = 0L);
 	virtual ~SimModSuite();
 
@@ -58,8 +59,9 @@ private:
 	void loadCAD(const char* modFile, const char* cadFile);
 	void loadSTL(const char *filename);
 	void extractCases(pGModel m_model, pACase &meshCase, const char *meshCaseName, pACase &analysisCase, const char *analysisCaseName);
-	void setCases(pGModel model, pACase &meshCase, pACase &analysisCase);
+	void setCases(pGModel model, pACase &meshCase, pACase &analysisCase, const char* stl_ParFile);
 	void analyse_mesh();
+	void probeFaceCoords(pGModel model);
 };
 
 #endif // SIM_MOD_SUITE_H
