@@ -6,7 +6,7 @@
  *  notice in the file 'COPYING' at the root directory of this package
  *  and the copyright notice at https://github.com/TUM-I5/PUML
  *
- * @copyright 2014 Technische Universitaet Muenchen
+ * @copyright 2014-2015 Technische Universitaet Muenchen
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  */
 
@@ -97,16 +97,16 @@ public:
 		if (nativeModel)
 			NM_release(nativeModel);
 
-        // check for model errors
-        pPList modelErrors = PList_new();
-        if (!GM_isValid(m_model, 0, modelErrors))
-                // TODO print more detail about errors
-                logError() << "Input model is not valid";
-        PList_delete(modelErrors);
+		// check for model errors
+		pPList modelErrors = PList_new();
+		if (!GM_isValid(m_model, 0, modelErrors))
+			// TODO print more detail about errors
+			logError() << "Input model is not valid";
+		PList_delete(modelErrors);
 
-        // Extract cases
+		// Extract cases
 		logInfo(PMU_rank()) << "Extracting cases";
-        pAManager attMngr = SModel_attManager(m_model);
+		pAManager attMngr = SModel_attManager(m_model);
 
 		MeshingOptions meshingOptions;
 		pACase meshCase = MS_newMeshCase(m_model);
@@ -120,30 +120,28 @@ public:
 			AttCase_setModel(static_cast<pACase>(child), m_model);
 		PList_delete(children);
 
-        // create the mesh
+		// create the mesh
 		m_simMesh = PM_new(0, m_model, PMU_size());
 
-        pProgress prog = Progress_new();
-        Progress_setCallback(prog, progressHandler);
+		pProgress prog = Progress_new();
+		Progress_setCallback(prog, progressHandler);
 
-        logInfo(PMU_rank()) << "Starting the surface mesher";
-        pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
-        progressBar.setTotal(26);
-        SurfaceMesher_execute(surfaceMesher, prog);
+		logInfo(PMU_rank()) << "Starting the surface mesher";
+		pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
+		progressBar.setTotal(26);
+		SurfaceMesher_execute(surfaceMesher, prog);
+		SurfaceMesher_delete(surfaceMesher);
 
-        logInfo(PMU_rank()) << "Starting the volume mesher";
-        pVolumeMesher volumeMesher = VolumeMesher_new(meshCase, m_simMesh);
-        VolumeMesher_setEnforceSize(volumeMesher, enforceSize);
-        progressBar.setTotal(6);
-        VolumeMesher_execute(volumeMesher, prog);
+		logInfo(PMU_rank()) << "Starting the volume mesher";
+		pVolumeMesher volumeMesher = VolumeMesher_new(meshCase, m_simMesh);
+		VolumeMesher_setEnforceSize(volumeMesher, enforceSize);
+		progressBar.setTotal(6);
+		VolumeMesher_execute(volumeMesher, prog);
+		VolumeMesher_delete(volumeMesher);
 
-        // Cleanup mesher
-        SurfaceMesher_delete(surfaceMesher);
-        VolumeMesher_delete(volumeMesher);
+		Progress_delete(prog);
 
-        Progress_delete(prog);
-
-        // Convert to APF mesh
+		// Convert to APF mesh
 		apf::Mesh* tmpMesh = apf::createMesh(m_simMesh);
 		gmi_register_sim();
 		gmi_model* model = gmi_import_sim(m_model);
