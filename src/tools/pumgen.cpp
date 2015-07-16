@@ -6,7 +6,7 @@
  *  notice in the file 'COPYING' at the root directory of this package
  *  and the copyright notice at https://github.com/TUM-I5/PUML
  *
- * @copyright 2013 Technische Universitaet Muenchen
+ * @copyright 2013-2015 Technische Universitaet Muenchen
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  */
 
@@ -130,7 +130,7 @@ int main(int argc, char* argv[])
 
 	// Parse command line arguments
 	utils::Args args;
-	const char* source[] = {"gambit", "fidap", "apf", "simmodsuite"};
+	const char* source[] = {"gambit", "fidap", "netcdf", "apf", "simmodsuite"};
 	args.addEnumOption("source", source, 's', "Mesh source (default: gambit)", false);
 	args.addOption("dump", 'd', "Dump APF mesh before partitioning it",
 			utils::Args::Required, false);
@@ -148,6 +148,7 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
+	args.addOption("sim_log", 0, "Create SimModSuite log", utils::Args::Required, false);
 	args.addAdditionalOption("input", "Input file (mesh or model)");
 	args.addAdditionalOption("partition", "Number of partitions");
 	args.addAdditionalOption("output", "Output parallel unstructured mesh file", false);
@@ -185,11 +186,15 @@ int main(int argc, char* argv[])
 		meshInput = new SerialMeshFile<ParallelFidapReader>(inputFile);
 		break;
 	case 2:
+		logInfo(rank) << "Using netCDF mesh";
+		logError() << "netCDF input is not supported in this version";
+		break;
+	case 3:
 		logInfo(rank) << "Using APF native format";
 		meshInput = new ApfNative(inputFile,
 				args.getArgument<const char*>("model", 0L));
 		break;
-	case 3:
+	case 4:
 #ifdef USE_SIMMOD
 		logInfo(rank) << "Using SimModSuite";
 
@@ -198,7 +203,8 @@ int main(int argc, char* argv[])
 				args.getArgument<const char*>("license", 0L),
 				args.getArgument<const char*>("mesh", "mesh"),
 				args.getArgument<const char*>("analysis", "analysis"),
-				args.getArgument<int>("enforce-size", 0));
+				args.getArgument<int>("enforce-size", 0),
+				args.getArgument<const char*>("sim_log", 0L));
 
 #else // USE_SIMMOD
 		logError() << "SimModSuite is not supported in this version";
