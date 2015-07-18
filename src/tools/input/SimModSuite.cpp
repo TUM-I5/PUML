@@ -97,7 +97,9 @@ SimModSuite::SimModSuite(const char* modFile, const char* cadFile,
     m_simMesh = PM_new(0, m_model, PMU_size());
 
     pProgress prog = Progress_new();
-    // Progress_setCallback(prog, progressHandler);
+    if (stl_ParFile == NULL) { // Deactivated for STL since progressHandler only writes noise to log-files
+        Progress_setCallback(prog, progressHandler);
+    }
 
     logInfo(PMU_rank()) << "Starting the surface mesher";
     pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
@@ -279,7 +281,7 @@ void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase
     // 3rd line: mesh size on fault
     // 4th line: Gradation rate
     // 5th line: Target equivolume skewness
-    // 5th line: Target equiarea skewness on fault
+    // 5th line: Target equiarea skewness
     std::ifstream casefile(stl_ParFile);
     std::string line;
     int numFaces = GM_numFaces(model);
@@ -424,13 +426,11 @@ void SimModSuite::setCases(pGModel model, pACase &meshCase, pACase &analysisCase
     logInfo(PMU_rank()) << "Target equivolume skewness =" << vol_skewness;
     MS_setVolumeShapeMetric(meshCase, modelDomain, ShapeMetricType_Skewness, vol_skewness);
 
-    // Set target equiarea skewness on fault
-    logInfo(PMU_rank()) << "Target equiarea skewness on fault =" << area_skewness;
+    // Set target equiarea skewness
+    logInfo(PMU_rank()) << "Target equiarea skewness =" << area_skewness;
     for (int i = 0; i < numFaces; i++) {
-        if(faceBound[i] == 3) {
-            face = GM_entityByTag(model, 2, i + 1);
-            MS_setSurfaceShapeMetric(meshCase, face, ShapeMetricType_Skewness, area_skewness);
-        }
+        face = GM_entityByTag(model, 2, i + 1);
+        MS_setSurfaceShapeMetric(meshCase, face, ShapeMetricType_Skewness, area_skewness);
     }
 }
 
