@@ -13,6 +13,8 @@
 
 Import('env')
 
+env.sourceFiles['pumgen'].append(env.tools.Object('NetCDFPartition.cpp'))
+
 if env['simModSuite']:
 	env.sourceFiles['pumgen'].append(env.tools.Object('SimModSuite.cpp'))
 

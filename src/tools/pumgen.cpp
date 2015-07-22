@@ -32,6 +32,7 @@
 #include "utils/logger.h"
 
 #include "input/SerialMeshFile.h"
+#include "input/NetCDFMesh.h"
 #include "input/ApfNative.h"
 #ifdef USE_SIMMOD
 #include "input/SimModSuite.h"
@@ -187,7 +188,7 @@ int main(int argc, char* argv[])
 		break;
 	case 2:
 		logInfo(rank) << "Using netCDF mesh";
-		logError() << "netCDF input is not supported in this version";
+		meshInput = new NetCDFMesh(inputFile);
 		break;
 	case 3:
 		logInfo(rank) << "Using APF native format";
