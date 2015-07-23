@@ -147,8 +147,6 @@ public:
 				checkNcError(nc_get_var1_uint(ncFile, ncVarElemSize, start, &size));
 				partitions[j].setElemSize(size);
 
-				nLocalElements += size;
-
 				size_t count[3] = {1, size, 4};
 
 				// Elements
@@ -172,8 +170,11 @@ public:
 				partitions[j].setVrtxSize(size);
 
 				partitions[j].computeLocalVertices();
+			}
 
-				nLocalVertices += partitions[j].nLocalVertices();
+			for (unsigned int i = 0; i < nLocalPart; i++) {
+				nLocalElements += partitions[i].nElements();
+				nLocalVertices += partitions[i].nLocalVertices();
 			}
 
 			// Propagate number of local vertices
