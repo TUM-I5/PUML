@@ -10,6 +10,8 @@
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  */
 
-#include "NetCDFPartition.h"
+#include <mpi.h>
 
-const int Partition::INTERNAL2EX_ORDER[4] = {0, 1, 3, 2};
+#include "ParallelVertexFilter.h"
+
+MPI_Datatype ParallelVertexFilter::vertexType = MPI_DATATYPE_NULL;

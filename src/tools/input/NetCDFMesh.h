@@ -32,6 +32,7 @@
 
 #include "MeshInput.h"
 #include "NetCDFPartition.h"
+#include "ParallelVertexFilter.h"
 
 /**
  * Read PUMGen generated mesh files
@@ -86,8 +87,8 @@ public:
 		PCU_Switch_Comm(commIO);
 #endif // PARALLEL
 
-		unsigned int nLocalElements = 0;
-		unsigned int nLocalVertices = 0;
+		unsigned int nElements = 0;
+		unsigned int nVertices = 0;
 		int* elements = 0L;
 		double* vertices = 0L;
 		int* boundaries = 0L;
@@ -102,18 +103,6 @@ public:
 			int ncVarElemVertices;
 			checkNcError(nc_inq_varid(ncFile, "element_vertices", &ncVarElemVertices));
 			collectiveAccess(ncFile, ncVarElemVertices);
-
-			int ncVarElemNeighborRanks;
-			checkNcError(nc_inq_varid(ncFile, "element_neighbor_ranks", &ncVarElemNeighborRanks));
-			collectiveAccess(ncFile, ncVarElemNeighborRanks);
-
-			int ncVarElemSideOrientations;
-			checkNcError(nc_inq_varid(ncFile, "element_side_orientations", &ncVarElemSideOrientations));
-			collectiveAccess(ncFile, ncVarElemSideOrientations);
-
-			int ncVarElemMPIIndices;
-			checkNcError(nc_inq_varid(ncFile, "element_mpi_indices", &ncVarElemMPIIndices));
-			collectiveAccess(ncFile, ncVarElemMPIIndices);
 
 			int ncVarElemBoundaries;
 			checkNcError(nc_inq_varid(ncFile, "element_boundaries", &ncVarElemBoundaries));
@@ -134,11 +123,9 @@ public:
 			Partition* partitions = new Partition[nLocalPart];
 
 			// Read elements
-			logInfo(rank) << "Reading elements";
+			logInfo(rank) << "Reading netCDF file";
 			for (unsigned int i = 0; i < nMaxLocalPart; i++) {
 				unsigned int j = i % nLocalPart;
-
-				partitions[j].setRank(j + rank*nMaxLocalPart);
 
 				size_t start[3] = {j + rank*nMaxLocalPart, 0, 0};
 
@@ -152,12 +139,6 @@ public:
 				// Elements
 				checkNcError(nc_get_vara_int(ncFile, ncVarElemVertices, start, count,
 						partitions[j].elements()));
-				checkNcError(nc_get_vara_int(ncFile, ncVarElemNeighborRanks, start, count,
-						partitions[j].neighborRanks()));
-				checkNcError(nc_get_vara_int(ncFile, ncVarElemSideOrientations, start, count,
-						partitions[j].neighborOrientation()));
-				checkNcError(nc_get_vara_int(ncFile, ncVarElemMPIIndices, start, count,
-						partitions[j].mpiIndices()));
 
 				// Boundaries and group
 				checkNcError(nc_get_vara_int(ncFile, ncVarElemBoundaries, start, count,
@@ -169,139 +150,82 @@ public:
 				checkNcError(nc_get_var1_uint(ncFile, ncVarVrtxSize, start, &size));
 				partitions[j].setVrtxSize(size);
 
-				partitions[j].computeLocalVertices();
-			}
-
-			for (unsigned int i = 0; i < nLocalPart; i++) {
-				nLocalElements += partitions[i].nElements();
-				nLocalVertices += partitions[i].nLocalVertices();
-			}
-
-			// Propagate number of local vertices
-			unsigned int vertexStart = nLocalVertices;
-#ifdef PARALLEL
-			MPI_Scan(MPI_IN_PLACE, &vertexStart, 1, MPI_UNSIGNED, MPI_SUM, commIO);
-#endif // PARALLEL
-			vertexStart -= nLocalVertices;
-
-			logInfo(rank) << "Convert local to global vertex ids";
-			for (unsigned int i = 0; i < nLocalPart; i++) {
-				partitions[i].convertLocalVertices(vertexStart);
-				partitions[i].buildVertexRecvLists();
-				vertexStart += partitions[i].nLocalVertices();
-			}
-
-			int done;
-			do {
-				// Transfer vertices until all partitions have received all
-				// required global ids. This might take more than one iteration
-				// since partitions might have an edge in common but only transfer
-				// vertices through faces
-				done = true;
-
-				PCU_Comm_Begin();
-				for (unsigned int i = 0; i < nLocalPart; i++) {
-					std::map<int, std::vector<int>> globalVertexIds;
-
-					partitions[i].buildVertexSendLists(globalVertexIds);
-
-					for (std::map<int, std::vector<int>>::iterator j = globalVertexIds.begin();
-							j != globalVertexIds.end(); j++) {
-
-						PCU_Comm_Pack(j->first / nMaxLocalPart, &j->first, sizeof(int));
-						int remoteRank = partitions[i].rank();
-						PCU_COMM_PACK(j->first / nMaxLocalPart, remoteRank);
-						size_t size = j->second.size();
-						PCU_COMM_PACK(j->first / nMaxLocalPart, size);
-						PCU_Comm_Pack(j->first / nMaxLocalPart, &j->second[0], size*sizeof(int));
-					}
-				}
-
-				PCU_Comm_Send();
-
-				while (PCU_Comm_Receive()) {
-					int localRank;
-					PCU_COMM_UNPACK(localRank);
-					int remoteRank;
-					PCU_COMM_UNPACK(remoteRank);
-					size_t size;
-					PCU_COMM_UNPACK(size);
-					int* globalVertexIds = new int[size];
-					PCU_Comm_Unpack(globalVertexIds, size*sizeof(int));
-
-					done &= partitions[localRank % nMaxLocalPart].buildLocal2GlobalMap(remoteRank, globalVertexIds);
-
-					delete [] globalVertexIds;
-				}
-
-				for (unsigned int i = 0; i < nLocalPart; i++)
-					partitions[i].applyLocal2GlobalMap();
-
-#ifdef PARALLEL
-				MPI_Allreduce(MPI_IN_PLACE, &done, 1, MPI_INT, MPI_LAND, commIO);
-#endif // PARALLEL
-			} while(!done);
-
-			logInfo(rank) << "Collecting elements";
-			elements = new int[nLocalElements*4];
-
-			unsigned int pos = 0;
-			for (unsigned int i = 0; i < nLocalPart; i++) {
-				memcpy(&elements[pos], partitions[i].globalElements(),
-						partitions[i].nElements()*4*sizeof(int));
-				pos += partitions[i].nElements() * 4;
-			}
-
-			logInfo(rank) << "Reading vertices";
-			vertices = new double[nLocalVertices*3];
-
-			pos = 0;
-			for (unsigned int i = 0; i < nMaxLocalPart; i++) {
-				unsigned int j = i % nLocalPart;
-
-				size_t start[3] = {j + rank*nMaxLocalPart, 0, 0};
-				size_t count[3] = {1, partitions[j].nVertices(), 3};
+				// Vertices
+				count[1] = size;
+				count[2] = 3;
 
 				checkNcError(nc_get_vara_double(ncFile, ncVarVrtxCoords, start, count,
 						partitions[j].vertices()));
-
-				partitions[j].extractGlobalVertices();
-
-				memcpy(&vertices[pos], partitions[i].globalVertices(),
-						partitions[i].nLocalVertices()*3*sizeof(double));
-				pos += partitions[i].nLocalVertices() * 3;
 			}
-
-			logInfo(rank) << "Collecting boundary conditions";
-			boundaries = new int[nLocalElements*4];
-			groups = new int[nLocalElements];
-
-			pos = 0;
-			for (unsigned int i = 0; i < nLocalPart; i++) {
-				partitions[i].convertBoundary();
-
-				memcpy(&boundaries[pos*4], partitions[i].boundaries(),
-						partitions[i].nElements()*4*sizeof(int));
-				memcpy(&groups[pos], partitions[i].groups(),
-						partitions[i].nElements()*sizeof(int));
-				pos += partitions[i].nElements();
-			}
-
-			delete [] partitions;
 
 			checkNcError(nc_close(ncFile));
+
+			for (unsigned int i = 0; i < nLocalPart; i++) {
+				nElements += partitions[i].nElements();
+				nVertices += partitions[i].nVertices();
+			}
+
+			// Copy to the buffer
+			unsigned int* elementsLocal = new unsigned int[nElements*4];
+			elements = new int[nElements*4];
+			vertices = new double[nVertices*3];
+
+			boundaries = new int[nElements*4];
+			groups = new int[nElements];
+
+			unsigned int elementOffset = 0;
+			unsigned int vertexOffset = 0;
+			for (unsigned int i = 0; i < nLocalPart; i++) {
+#ifdef _OPENMP
+				#pragma omp parallel
+#endif
+				for (unsigned int j = 0; j < partitions[i].nElements()*4; j++)
+					elementsLocal[elementOffset*4 + j] = partitions[i].elements()[j] + vertexOffset;
+
+				memcpy(&vertices[vertexOffset*3], partitions[i].vertices(),
+						partitions[i].nVertices()*3*sizeof(double));
+
+				partitions[i].convertBoundary();
+				memcpy(&boundaries[elementOffset*4], partitions[i].boundaries(),
+						partitions[i].nElements()*4*sizeof(int));
+				memcpy(&groups[elementOffset], partitions[i].groups(),
+						partitions[i].nElements()*sizeof(int));
+
+				elementOffset += partitions[i].nElements();
+				vertexOffset += partitions[i].nVertices();
+			}
+
+			logInfo(rank) << "Running vertex filter";
+			ParallelVertexFilter filter(commIO);
+			filter.filter(nVertices, vertices);
+
+			// Create filtered vertex list
+			delete [] vertices;
+
+			nVertices = filter.numLocalVertices();
+			vertices = new double[nVertices*3];
+			memcpy(vertices, filter.localVertices(), nVertices*3*sizeof(double));
+
+			logInfo(rank) << "Converting local to global vertex identifier";
+#ifdef _OPENMP
+			#pragma omp parallel
+#endif
+			for (unsigned int i = 0; i < nElements*4; i++)
+				elements[i] = filter.globalIds()[elementsLocal[i]];
+
+			delete [] partitions;
 		}
 
 		logInfo(rank) << "Constructing the mesh";
 		apf::GlobalToVert vertMap;
-		apf::construct(m_mesh, elements, nLocalElements, apf::Mesh::TET, vertMap);
+		apf::construct(m_mesh, elements, nElements, apf::Mesh::TET, vertMap);
 		delete [] elements;
 
 		apf::alignMdsRemotes(m_mesh);
 		apf::deriveMdsModel(m_mesh);
 
 		logInfo(rank) << "Set coordinates in APF";
-		apf::setCoords(m_mesh, vertices, nLocalVertices, vertMap);
+		apf::setCoords(m_mesh, vertices, nVertices, vertMap);
 		delete [] vertices;
 
 		// Set boundaries
