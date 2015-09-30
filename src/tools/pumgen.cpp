@@ -180,7 +180,7 @@ int main(int argc, char* argv[])
 	switch (args.getArgument<int>("source", 0)) {
 	case 0:
 		logInfo(rank) << "Using Gambit mesh";
-		meshInput = new SerialMeshFile<ParallelGambitReader>(inputFile);
+		meshInput = new SerialMeshFile<puml::ParallelGambitReader>(inputFile);
 		break;
 	case 1:
 		logInfo(rank) << "Using Fidap mesh";

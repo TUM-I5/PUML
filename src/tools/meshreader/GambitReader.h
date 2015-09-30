@@ -23,6 +23,9 @@
 
 #include "MeshReader.h"
 
+namespace puml
+{
+
 /**
  * Describes the group of an element
  */
@@ -527,5 +530,7 @@ private:
 	static const char* ELEMENT_GROUP;
 	static const char* BOUNDARY_CONDITIONS;
 };
+
+}
 
 #endif // GAMBIT_READER_H

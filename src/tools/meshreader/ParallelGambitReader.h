@@ -18,6 +18,9 @@
 #include "GambitReader.h"
 #include "ParallelMeshReader.h"
 
+namespace puml
+{
+
 class ParallelGambitReader : public ParallelMeshReader<GambitReader>
 {
 public:
@@ -226,5 +229,7 @@ public:
 		}
 	}
 };
+
+}
 
 #endif // PARALLEL_GAMBIT_READER

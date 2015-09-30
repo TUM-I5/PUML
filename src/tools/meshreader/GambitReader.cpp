@@ -12,9 +12,9 @@
 
 #include "GambitReader.h"
 
-const char* GambitReader::GAMBIT_FILE_ID = "** GAMBIT NEUTRAL FILE";
-const char* GambitReader::ENDSECTION = "ENDOFSECTION";
-const char* GambitReader::NODAL_COORDINATES = "NODAL COORDINATES";
-const char* GambitReader::ELEMENT_CELLS = "ELEMENTS/CELLS";
-const char* GambitReader::ELEMENT_GROUP = "ELEMENT GROUP";
-const char* GambitReader::BOUNDARY_CONDITIONS = "BOUNDARY CONDITIONS";
+const char* puml::GambitReader::GAMBIT_FILE_ID = "** GAMBIT NEUTRAL FILE";
+const char* puml::GambitReader::ENDSECTION = "ENDOFSECTION";
+const char* puml::GambitReader::NODAL_COORDINATES = "NODAL COORDINATES";
+const char* puml::GambitReader::ELEMENT_CELLS = "ELEMENTS/CELLS";
+const char* puml::GambitReader::ELEMENT_GROUP = "ELEMENT GROUP";
+const char* puml::GambitReader::BOUNDARY_CONDITIONS = "BOUNDARY CONDITIONS";
