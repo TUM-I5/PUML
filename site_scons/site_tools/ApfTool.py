@@ -28,7 +28,8 @@ def generate(env, **kw):
     simLibs = [('gmi_sim', 'gmi_sim.h'), ('apf_sim', 'apfSIM.h')]
     # Other APF libs
     libs = [('gmi', 'gmi.h'), ('mds', 'apfMDS.h'), ('ma', 'ma.h'),
-            ('apf_zoltan', 'apfZoltan.h'), ('apf', 'apf.h'), ('pcu', 'PCU.h')]
+            ('apf_zoltan', 'apfZoltan.h'), ('apf', 'apf.h'), ('pcu', 'PCU.h'),
+            ('lion','lionCompress.h'), ('mth','mth.h')]
     
     if sim:
         libs = simLibs + libs
