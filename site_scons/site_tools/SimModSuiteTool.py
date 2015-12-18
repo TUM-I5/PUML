@@ -52,7 +52,7 @@ def generate(env, **kw):
 
     # TODO not all libraries may be available/required
     # TODO different parasolid versions not handled currently
-    libs = ['SimField', 'SimDiscrete', 'SimAdvMeshing', 'SimMeshTools', 'SimParasolid260',
+    libs = ['SimField', 'SimDiscrete', 'SimAdvMeshing', 'SimMeshTools', 'SimParasolid270',
             'SimPartitionedMesh-mpi', 'SimPartitionWrapper-'+mpi, 'SimModel', 'pskernel']
     for l in libs:
         if not conf.CheckLib(l):
