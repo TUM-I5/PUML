@@ -25,6 +25,7 @@
 #include <apfSIM.h>
 #include <gmi_sim.h>
 
+#include <SimModel.h>
 #include <SimDiscrete.h>
 #include <SimParasolidKrnl.h>
 #include <MeshSim.h>
@@ -93,6 +94,7 @@ public:
 			nativeModel = ParasolidNM_createFromFile(sCadFile.c_str(), 0);
 
 		m_model = GM_load(modFile, nativeModel, 0L);
+		nativeModel = GM_nativeModel(m_model);
 
 		if (nativeModel)
 			NM_release(nativeModel);
@@ -120,17 +122,25 @@ public:
 			AttCase_setModel(static_cast<pACase>(child), m_model);
 		PList_delete(children);
 
-		// create the mesh
-		m_simMesh = PM_new(0, m_model, PMU_size());
+		if (nativeModel)
+			m_simMesh = PM_new(0, m_model, PMU_size());
+		else
+			// Discrete model
+			m_simMesh = PM_new(0, m_model, 1);
 
 		pProgress prog = Progress_new();
 		Progress_setCallback(prog, progressHandler);
 
+		// create the mesh
 		logInfo(PMU_rank()) << "Starting the surface mesher";
 		pSurfaceMesher surfaceMesher = SurfaceMesher_new(meshCase, m_simMesh);
 		progressBar.setTotal(26);
 		SurfaceMesher_execute(surfaceMesher, prog);
 		SurfaceMesher_delete(surfaceMesher);
+
+		if (!nativeModel)
+			// Discrete model
+			PM_setTotalNumParts(m_simMesh, PMU_size());
 
 		logInfo(PMU_rank()) << "Starting the volume mesher";
 		pVolumeMesher volumeMesher = VolumeMesher_new(meshCase, m_simMesh);
@@ -182,7 +192,7 @@ public:
 	virtual ~SimModSuite()
 	{
 		M_release(m_simMesh);
-		// TODO we can delete the model here because it is still
+		// We cannot delete the model here because it is still
 		// connected to the mesh
 		//GM_release(m_model);
 
