@@ -33,7 +33,7 @@ public:
 	}
 
 	ParallelFidapReader(const char* meshFile, MPI_Comm comm = MPI_COMM_WORLD)
-		: ParallelMeshReader(meshFile, comm)
+		: ParallelMeshReader<FidapReader>(meshFile, comm)
 	{
 	}
 
