@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstring>
+#include <unordered_map>
 
 #include <apf.h>
 #include <apfMDS.h>
@@ -182,6 +183,30 @@ public:
 
 		}
 		m_mesh->end(it);
+
+		// Create group lookup table
+		std::unordered_map<pGRegion, int> groupTable;
+		GRIter regionIt = GM_regionIter(m_model);
+		while (pGRegion region = GRIter_next(regionIt)) {
+			int id = groupTable.size() + 1;
+			groupTable[region] = id;
+		}
+
+		// Set groups
+		apf::MeshTag* groupTag = m_mesh->createIntTag("group", 1);
+		it = m_mesh->begin(3);
+		while (apf::MeshEntity* element = m_mesh->iterate(it)) {
+			apf::ModelEntity* modelRegion = m_mesh->toModel(element);
+
+			pGRegion simRegion = reinterpret_cast<pGRegion>(modelRegion);
+			std::unordered_map<pGRegion, int>::const_iterator i = groupTable.find(simRegion);
+			if (i == groupTable.end())
+				logError() << "Mesh element with unknown region found.";
+
+			m_mesh->setIntTag(element, groupTag, &i->second);
+		}
+		m_mesh->end(it);
+
 		AttCase_unassociate(analysisCase);
 
 		// Delete cases
