@@ -109,8 +109,13 @@ public:
 			collectiveAccess(ncFile, ncVarElemBoundaries);
 
 			int ncVarElemGroup;
-			checkNcError(nc_inq_varid(ncFile, "element_group", &ncVarElemGroup));
-			collectiveAccess(ncFile, ncVarElemGroup);
+			bool useGroups = true;
+			if (nc_inq_varid(ncFile, "element_group", &ncVarElemGroup) != NC_NOERR) {
+				useGroups = false;
+				logWarning() << "No group found, using group 0 for all elements";
+			}else{
+				collectiveAccess(ncFile, ncVarElemGroup);
+			}
 
 			int ncVarVrtxSize;
 			checkNcError(nc_inq_varid(ncFile, "vertex_size", &ncVarVrtxSize));
@@ -143,7 +148,8 @@ public:
 				// Boundaries and group
 				checkNcError(nc_get_vara_int(ncFile, ncVarElemBoundaries, start, count,
 						partitions[j].boundaries()));
-				checkNcError(nc_get_vara_int(ncFile, ncVarElemGroup, start, count,
+				if (useGroups)
+					checkNcError(nc_get_vara_int(ncFile, ncVarElemGroup, start, count,
 						partitions[j].groups()));
 
 				// Vertex size

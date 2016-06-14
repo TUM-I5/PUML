@@ -54,6 +54,8 @@ public:
 		m_elements = new int[nElements*4];
 		m_boundaries = new int[nElements*4];
 		m_groups = new int[nElements];
+		// Set default value for groups
+		memset(m_groups, 0, nElements*sizeof(int));
 	}
 
 	void setVrtxSize(unsigned int nVertices)
