@@ -147,6 +147,8 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
 			utils::Args::Required, false);
+	args.addOption("weights", 'w', "Weights for different partitions",utils::Args::Required,false);
+
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
 	args.addOption("sim_log", 0, "Create SimModSuite log", utils::Args::Required, false);
@@ -163,6 +165,7 @@ int main(int argc, char* argv[])
 	if (nPartitions == 0)
 		logError() << "Partitions created must be greater than zero";
 
+	
 	std::string outputFile;
 	if (args.isSetAdditional("output")) {
 		outputFile = args.getAdditionalArgument<std::string>("output");
@@ -174,6 +177,16 @@ int main(int argc, char* argv[])
 			outputFile.erase(dotPos);
 		outputFile.append(".nc.pum");
 	}
+
+
+ 	std::vector<float> weights;
+	std::vector<float> no_weights;
+	no_weights.push_back(1.0);
+	weights= args.getArgument<std::vector<float>>("weights",no_weights);
+  
+        if((nPartitions % weights.size()) !=0){
+	  logError() << "nPartitons ("<<nPartitions<<") must be a multiple of the size of weights ("<<weights.size()<<")";
+	} 
 
 	MeshInput* meshInput = 0L;
 	apf::Mesh2* mesh = 0L;
@@ -305,10 +318,23 @@ int main(int argc, char* argv[])
 	idx_t ncon = 1;
 	idx_t nparts = nPartitions;
 
-	real_t* tpwgts = new real_t[nPartitions];
-	for (unsigned int i = 0; i < nPartitions; i++)
-		tpwgts[i] = 1./nPartitions;
+	int n_weights=weights.size();
+	float sum_weights;
+	for(std::vector<float>::iterator it = weights.begin(); it != weights.end(); ++it){
+	    sum_weights += *it;
+	}
+	sum_weights= ((float)nPartitions/(float)n_weights)* sum_weights;
 
+	real_t* tpwgts = new real_t[nPartitions];
+
+	for (unsigned int i = 0 ; i< n_weights; i++){
+	  logInfo() << "Using ratio : " << weights[i]/sum_weights;
+	}
+
+	for (unsigned int i = 0; i < nPartitions; i++){
+	  //		tpwgts[i] = 1./nPartitions;
+	  tpwgts[i] = weights[i%n_weights]/sum_weights;
+	}
 	real_t ubev = 1.01;
 	idx_t options[3] = {1, 0, METIS_RANDOM_SEED};
 

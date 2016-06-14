@@ -65,6 +65,12 @@ public:
 
 		m_vertices = new double[nVertices*3];
 	}
+	
+	void setEqualGroups(int group){	
+	  for(unsigned int i = 0 ; i < m_nElements; i++){
+	    m_groups[i] = group;
+	  }
+	}
 
 	void convertBoundary()
 	{

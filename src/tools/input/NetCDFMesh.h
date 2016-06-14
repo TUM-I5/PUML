@@ -109,8 +109,14 @@ public:
 			collectiveAccess(ncFile, ncVarElemBoundaries);
 
 			int ncVarElemGroup;
-			checkNcError(nc_inq_varid(ncFile, "element_group", &ncVarElemGroup));
-			collectiveAccess(ncFile, ncVarElemGroup);
+			int error = nc_inq_varid(ncFile, "element_group", &ncVarElemGroup);
+			if (error != NC_NOERR){
+			  logWarning() << "Error while reading netCDF file:" << nc_strerror(error);
+			  logWarning() << "Using group 0 for all elements";
+			  
+			}else{
+			  collectiveAccess(ncFile, ncVarElemGroup);
+			}
 
 			int ncVarVrtxSize;
 			checkNcError(nc_inq_varid(ncFile, "vertex_size", &ncVarVrtxSize));
@@ -143,8 +149,9 @@ public:
 				// Boundaries and group
 				checkNcError(nc_get_vara_int(ncFile, ncVarElemBoundaries, start, count,
 						partitions[j].boundaries()));
-				checkNcError(nc_get_vara_int(ncFile, ncVarElemGroup, start, count,
-						partitions[j].groups()));
+				if (nc_get_vara_int(ncFile, ncVarElemGroup, start, count,
+						    partitions[j].groups()) != NC_NOERR){
+				}
 
 				// Vertex size
 				checkNcError(nc_get_var1_uint(ncFile, ncVarVrtxSize, start, &size));
@@ -278,7 +285,7 @@ private:
 	static void checkNcError(int error)
 	{
 		if (error != NC_NOERR)
-			logError() << "Error while reading netCDF file:" << nc_strerror(error);
+		  logError() << "Error while reading netCDF file:" << nc_strerror(error);			
 	}
 };
 

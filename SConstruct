@@ -123,7 +123,7 @@ if 'cxx' in env:
   env['CXX'] = env['cxx']
 else:
   if env['parallelization'] in ['mpi']:
-    env['CXX'] = 'mpicxx'
+    env['CXX'] = 'mpiicpc'
   else:
     env['CXX'] = 'g++'
 

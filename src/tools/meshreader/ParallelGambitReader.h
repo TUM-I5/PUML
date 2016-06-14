@@ -30,7 +30,7 @@ public:
 	}
 
 	ParallelGambitReader(const char* meshFile, MPI_Comm comm = MPI_COMM_WORLD)
-		: ParallelMeshReader(meshFile, comm)
+		: ParallelMeshReader<GambitReader>(meshFile, comm)
 	{
 	}
 
