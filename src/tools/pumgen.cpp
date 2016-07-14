@@ -40,6 +40,10 @@
 #include "meshreader/ParallelGambitReader.h"
 #include "meshreader/ParallelFidapReader.h"
 
+#ifdef HAVE_PROJ4
+#include "model/Weights.h"
+#endif
+
 const static unsigned int FACE2INTERNAL[] = {0, 1, 3, 2};
 
 struct MPINeighborElement {
@@ -139,6 +143,8 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("vtk", 0, "Dump mesh to VTK files",
 			utils::Args::Required, false);
+  args.addOption("velocity_model", 'v', "Velocity model configuration file for local time stepping",
+      utils::Args::Required, false);
 	args.addOption("weights", 'w', "Weights for partitions (Format: w0:w1:w2:...)",
 			utils::Args::Required, false);
 	args.addOption("license", 'l', "License file (only used by SimModSuite)",
@@ -177,6 +183,17 @@ int main(int argc, char* argv[])
 			outputFile.erase(dotPos);
 		outputFile.append(".nc.pum");
 	}
+  
+  // Check velocity model
+  const char* velocityModelStr = args.getArgument<const char*>("velocity_model", "");
+  bool enableVertexWeights = false;
+  if (strlen(velocityModelStr) > 0) {
+#ifdef HAVE_PROJ4
+    enableVertexWeights = true;
+#else
+    logError() << "Using velocity models requires proj.4.";
+#endif
+  }
 
 	// Parse/check weigths
 	const char* weightStr = args.getArgument<const char*>("weights", "1");
@@ -318,7 +335,15 @@ int main(int argc, char* argv[])
 	idx_t numflag = 0;
 	idx_t ncon = 1;
 	idx_t nparts = nPartitions;
-
+  
+  // Vertex weights
+  idx_t* vwgt = 0L;
+  if (enableVertexWeights) {
+    wgtflag = 2;
+    vwgt = computeVertexWeights(mesh, velocityModelStr);
+  }
+  
+  // Node weights
 	real_t sumWeights = 0.0;
 	for(std::vector<real_t>::const_iterator it = weights.begin(); it != weights.end(); ++it)
 		sumWeights += *it;
@@ -337,10 +362,11 @@ int main(int argc, char* argv[])
 	idx_t* part = new idx_t[nLocalElements];
 
 	MPI_Comm commWorld = MPI_COMM_WORLD;
-	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, 0L, 0L, &wgtflag, &numflag, &ncon,
+	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, vwgt, 0L, &wgtflag, &numflag, &ncon,
 			&nparts, tpwgts, &ubev, options, &edgecut, part, &commWorld) != METIS_OK)
 		logError() << "Could not create partitions";
 
+  delete [] vwgt;
 	delete [] elemDist;
 	delete [] xadj;
 	delete [] adjncy;

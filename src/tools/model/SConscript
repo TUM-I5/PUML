@@ -1,0 +1,21 @@
+#! /usr/bin/python
+
+# @file
+#  This file is part of PUML
+#
+#  For conditions of distribution and use, please see the copyright
+#  notice in the file 'COPYING' at the root directory of this package
+#  and the copyright notice at https://github.com/TUM-I5/PUML
+# 
+# @copyright 2016 Technische Universitaet Muenchen
+# @author Carsten Uphoff <uphoff@in.tum.de>
+#
+
+Import('env')
+
+if env['have_proj4']:
+  env.sourceFiles['pumgen'].extend([
+      env.tools.Object('Weights.cpp'),
+      env.tools.Object('SeismicVelocity.cpp')])
+
+Export('env')

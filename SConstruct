@@ -160,6 +160,9 @@ env.Tool('PrefixPathTool')
 # netCDF
 env.Tool('NetcdfTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 
+# proj.4
+env.Tool('ProjTool', required=False)
+
 #
 # setup the library name and the build directory
 #
@@ -182,6 +185,7 @@ env.tools.Append(CPPPATH=['#/submodules'])
 #env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
 env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
+env.tools.Append(LIBS='imf')
 # (Par)METIS
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 

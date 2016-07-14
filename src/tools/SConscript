@@ -15,7 +15,7 @@ Import('env')
 
 env.sourceFiles['pumgen'] = [env.tools.Object('pumgen.cpp')]
 
-for dir in ['input', 'meshreader']:
+for dir in ['input', 'meshreader', 'model']:
     Export('env')
     SConscript(dir+'/SConscript', variant_dir='#/'+env['buildDir']+'/src', src_dir='#/src', duplicate=0)
     Import('env')
