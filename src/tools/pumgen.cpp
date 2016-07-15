@@ -333,7 +333,7 @@ int main(int argc, char* argv[])
 
 	idx_t wgtflag = 0;
 	idx_t numflag = 0;
-	idx_t ncon = 1;
+	idx_t ncon = 2;
 	idx_t nparts = nPartitions;
   
   // Vertex weights
@@ -352,10 +352,12 @@ int main(int argc, char* argv[])
 	for(std::vector<real_t>::const_iterator it = weights.begin(); it != weights.end(); ++it)
 		logInfo() << "Using ratio: " << (*it) / sumWeights;
 
-	real_t* tpwgts = new real_t[nPartitions];
-	for (unsigned int i = 0; i < nPartitions; i++)
-		tpwgts[i] = weights[i % weights.size()] / sumWeights;
-	real_t ubev = 1.01;
+	real_t* tpwgts = new real_t[2*nPartitions];
+	for (unsigned int i = 0; i < nPartitions; i++) {
+		tpwgts[2*i] = weights[i % weights.size()] / sumWeights;
+    tpwgts[2*i+1] = tpwgts[2*i];
+  }
+	real_t ubev[2] = {1.01, 1.01};
 	idx_t options[3] = {1, 0, METIS_RANDOM_SEED};
 
 	idx_t edgecut;
@@ -363,7 +365,7 @@ int main(int argc, char* argv[])
 
 	MPI_Comm commWorld = MPI_COMM_WORLD;
 	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, vwgt, 0L, &wgtflag, &numflag, &ncon,
-			&nparts, tpwgts, &ubev, options, &edgecut, part, &commWorld) != METIS_OK)
+			&nparts, tpwgts, ubev, options, &edgecut, part, &commWorld) != METIS_OK)
 		logError() << "Could not create partitions";
 
   delete [] vwgt;
