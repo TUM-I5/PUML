@@ -55,6 +55,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem)
     lat[iElem] = barycenter.x();
     lon[iElem] = barycenter.y();
     height[iElem] = barycenter.z();
+    ++iElem;
   }
 	mesh->end(it);
   
@@ -64,10 +65,12 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem)
   if (!(pj_mesh = pj_init_plus(sourceCoordSystem))) { 
     projPrintLastError();
   }
-  if (!(pj_lonlat = pj_init_plus("+proj=lonlat +datum=WGS84 +units=m +no_defs"))) { 
+  if (!(pj_lonlat = pj_init_plus("+proj=latlon +datum=WGS84 +units=m +no_defs"))) {
     projPrintLastError();
   }
+
   pj_transform(pj_mesh, pj_lonlat, nLocalElements, 1, lat, lon, height);
+  projPrintLastError();
 
   pj_free(pj_lonlat);
   pj_free(pj_mesh);
