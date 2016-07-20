@@ -4,6 +4,7 @@
 #include <maMesh.h>
 #include <utils/logger.h>
 #include <projects.h>
+#include <parmetis.h>
 #include "SeismicVelocity.h"
 
 void projPrintLastError()
@@ -124,4 +125,33 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem)
   delete[] dynamicRupture;
   
   return vwgt;
+}
+
+idx_t* computeEdgeWeights(apf::Mesh2* mesh, int const* dualGraph, idx_t nEdges)
+{
+  unsigned nLocalElements = apf::countOwned(mesh, 3);
+  idx_t* adjwgt = new idx_t[nEdges];
+  std::fill(adjwgt, adjwgt + nEdges, 1.0);
+  apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
+	unsigned int pos = 0;
+	apf::MeshIterator* it = mesh->begin(3);
+	for (unsigned int e = 0; e < nLocalElements; ++e) {
+    apf::MeshEntity* element = mesh->iterate(it);
+    apf::Downward faces;
+    mesh->getDownward(element, 2, faces);
+    for (unsigned int f = 0; f < 4; ++f) {
+      if (dualGraph[e*4 + f] >= 0) {
+        if (boundaryTag && mesh->hasTag(faces[f], boundaryTag)) {
+          int boundary;
+          mesh->getIntTag(faces[f], boundaryTag, &boundary);
+          if (boundary == 3) {
+            adjwgt[pos] = 100.0;
+          }
+        }
+        ++pos;
+      }
+    }
+	}
+  mesh->end(it);
+  return adjwgt;
 }

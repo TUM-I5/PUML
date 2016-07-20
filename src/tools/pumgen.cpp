@@ -329,8 +329,6 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	delete [] dualGraph;
-
 	idx_t wgtflag = 0;
 	idx_t numflag = 0;
 	idx_t ncon = 2;
@@ -338,10 +336,14 @@ int main(int argc, char* argv[])
   
   // Vertex weights
   idx_t* vwgt = 0L;
+  idx_t* adjwgt = 0L;
   if (enableVertexWeights) {
-    wgtflag = 2;
+    wgtflag = 3;
     vwgt = computeVertexWeights(mesh, velocityModelStr);
+    adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
   }
+
+	delete [] dualGraph;
   
   // Node weights
 	real_t sumWeights = 0.0;
@@ -364,9 +366,11 @@ int main(int argc, char* argv[])
 	idx_t* part = new idx_t[nLocalElements];
 
 	MPI_Comm commWorld = MPI_COMM_WORLD;
-	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, vwgt, 0L, &wgtflag, &numflag, &ncon,
+	if (ParMETIS_V3_PartKway(elemDist, xadj, adjncy, vwgt, adjwgt, &wgtflag, &numflag, &ncon,
 			&nparts, tpwgts, ubev, options, &edgecut, part, &commWorld) != METIS_OK)
 		logError() << "Could not create partitions";
+    
+  logInfo() << "Edge-cut:" << edgecut;
 
   delete [] vwgt;
 	delete [] elemDist;
