@@ -143,7 +143,9 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("vtk", 0, "Dump mesh to VTK files",
 			utils::Args::Required, false);
-  args.addOption("velocity_model", 'v', "Velocity model configuration file for local time stepping",
+  args.addOption("vertex_weights", 'v', "Use vertex weights",
+      utils::Args::No, false);
+  args.addOption("velocity_model", 0, "Velocity model configuration file for local time stepping",
       utils::Args::Required, false);
 	args.addOption("weights", 'w', "Weights for partitions (Format: w0:w1:w2:...)",
 			utils::Args::Required, false);
@@ -185,10 +187,13 @@ int main(int argc, char* argv[])
 	}
   
   // Check velocity model
+  bool enableVertexWeights = args.getArgument<bool>("vertex_weights", false);
   const char* velocityModelStr = args.getArgument<const char*>("velocity_model", "");
-  bool enableVertexWeights = false;
   if (strlen(velocityModelStr) > 0) {
 #ifdef HAVE_PROJ4
+    if (!enableVertexWeights) {
+      logInfo() << "Enabling vertex weights due to velocity model.";
+    }
     enableVertexWeights = true;
 #else
     logError() << "Using velocity models requires proj.4.";
@@ -331,16 +336,17 @@ int main(int argc, char* argv[])
 
 	idx_t wgtflag = 0;
 	idx_t numflag = 0;
-	idx_t ncon = 2;
+	idx_t ncon = 1;
 	idx_t nparts = nPartitions;
   
   // Vertex weights
   idx_t* vwgt = 0L;
   idx_t* adjwgt = 0L;
   if (enableVertexWeights) {
-    wgtflag = 3;
-    vwgt = computeVertexWeights(mesh, velocityModelStr);
-    adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
+    // wgtflag = 3;
+    wgtflag = 2;
+    vwgt = computeVertexWeights(mesh, velocityModelStr, ncon);
+    // adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
   }
 
 	delete [] dualGraph;

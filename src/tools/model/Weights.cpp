@@ -27,67 +27,73 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
   return cluster;
 }
 
-idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem)
+idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx_t& ncon)
 {
   unsigned nLocalElements = apf::countOwned(mesh, 3);
-  double* lat = new double[nLocalElements];
-  double* lon = new double[nLocalElements];
-  double* height = new double[nLocalElements];
   double* timesteps = new double[nLocalElements];
   bool* dynamicRupture = new bool[nLocalElements];
   double localMinTimestep = std::numeric_limits<double>::max();
   double localMaxTimestep = std::numeric_limits<double>::min();
   double globalMinTimestep, globalMaxTimestep;
+  int localNumDrFaces = 0, globalNumDrFaces;
   
   std::fill(dynamicRupture, dynamicRupture + nLocalElements, false);
+  
+  if (strlen(sourceCoordSystem) > 0) {
+    double* lat = new double[nLocalElements];
+    double* lon = new double[nLocalElements];
+    double* height = new double[nLocalElements];
+  
+    // Compute barycenter of each tetrahedron
+    unsigned iElem = 0;
+    apf::MeshIterator* it = mesh->begin(3);
+    while (apf::MeshEntity* element = mesh->iterate(it)) {
+      apf::Downward vertices;
+      mesh->getDownward(element, 0, vertices);
+      apf::Vector3 barycenter(0.,0.,0.);
+      for (unsigned v = 0; v < 4; ++v) {
+        apf::Vector3 x;
+        mesh->getPoint(vertices[v], 0, x);
+        barycenter += x * 0.25;
+      }
+      lat[iElem] = barycenter.x();
+      lon[iElem] = barycenter.y();
+      height[iElem] = barycenter.z();
+      ++iElem;
+    }
+    mesh->end(it);
+    
+    projPJ pj_lonlat;
+    projPJ pj_mesh;
+    // Transform from mesh coordinate system to latitude, longitude, height
+    if (!(pj_mesh = pj_init_plus(sourceCoordSystem))) { 
+      projPrintLastError();
+    }
+    if (!(pj_lonlat = pj_init_plus("+proj=latlon +datum=WGS84 +units=m +no_defs"))) {
+      projPrintLastError();
+    }
 
-  // Compute barycenter of each tetrahedron
+    pj_transform(pj_mesh, pj_lonlat, nLocalElements, 1, lat, lon, height);
+    projPrintLastError();
+
+    pj_free(pj_lonlat);
+    pj_free(pj_mesh);
+    
+    // Compute maximum wave velocity (= P wave)
+    get_material_parameters(lat, lon, height, nLocalElements, Vp, timesteps);
+    
+    delete[] lat;
+    delete[] lon;
+    delete[] height;
+  } else {
+    std::fill(timesteps, timesteps + nLocalElements, 1.0);    
+  }
+  
+  // Compute timesteps
   unsigned iElem = 0;
   apf::MeshIterator* it = mesh->begin(3);
 	while (apf::MeshEntity* element = mesh->iterate(it)) {
-    apf::Downward vertices;
-    mesh->getDownward(element, 0, vertices);
-    apf::Vector3 barycenter(0.,0.,0.);
-    for (unsigned v = 0; v < 4; ++v) {
-      apf::Vector3 x;
-      mesh->getPoint(vertices[v], 0, x);
-      barycenter += x * 0.25;
-    }
-    lat[iElem] = barycenter.x();
-    lon[iElem] = barycenter.y();
-    height[iElem] = barycenter.z();
-    ++iElem;
-  }
-	mesh->end(it);
-  
-  projPJ pj_lonlat;
-  projPJ pj_mesh;
-  // Transform from mesh coordinate system to latitude, longitude, height
-  if (!(pj_mesh = pj_init_plus(sourceCoordSystem))) { 
-    projPrintLastError();
-  }
-  if (!(pj_lonlat = pj_init_plus("+proj=latlon +datum=WGS84 +units=m +no_defs"))) {
-    projPrintLastError();
-  }
-
-  pj_transform(pj_mesh, pj_lonlat, nLocalElements, 1, lat, lon, height);
-  projPrintLastError();
-
-  pj_free(pj_lonlat);
-  pj_free(pj_mesh);
-  
-  // Compute maximum wave velocity (= P wave)
-  get_material_parameters(lat, lon, height, nLocalElements, Vp, timesteps);
-  
-  delete[] lat;
-  delete[] lon;
-  delete[] height;
-  
-  // Compute timesteps
-  iElem = 0;
-  it = mesh->begin(3);
-	while (apf::MeshEntity* element = mesh->iterate(it)) {
-    timesteps[iElem] = ma::getInsphere(mesh, element) / timesteps[iElem]; // TODO: divide by wavespeed
+    timesteps[iElem] = ma::getInsphere(mesh, element) / timesteps[iElem];
 
     localMinTimestep = std::min(localMinTimestep, timesteps[iElem]);
     localMaxTimestep = std::max(localMaxTimestep, timesteps[iElem]);
@@ -110,15 +116,23 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem)
         dynamicRupture[iElem] = dynamicRupture[iElem] || (boundary == 3);
       }
     }
+    localNumDrFaces += (dynamicRupture[iElem]) ? 1 : 0;
     ++iElem;
   }
 	mesh->end(it);
   
+	MPI_Allreduce(&localNumDrFaces, &globalNumDrFaces, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  
+  ncon = (globalNumDrFaces > 0) ? 2 : 1;
   unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, 2);
-  idx_t* vwgt = new idx_t[2*nLocalElements];
+  idx_t* vwgt = new idx_t[ncon*nLocalElements];
   for (iElem = 0; iElem < nLocalElements; ++iElem) {
-    vwgt[2*iElem] = (1 << (maxCluster - getCluster(timesteps[iElem], globalMinTimestep, 2))); // Valid for rate 2
-    vwgt[2*iElem+1] = (dynamicRupture[iElem]) ? 1 : 0;
+    vwgt[ncon*iElem] = (1 << (maxCluster - getCluster(timesteps[iElem], globalMinTimestep, 2))); // Valid for rate 2
+  }
+  if (globalNumDrFaces > 0) {
+    for (iElem = 0; iElem < nLocalElements; ++iElem) {
+      vwgt[ncon*iElem+1] = (dynamicRupture[iElem]) ? 1 : 0;
+    }
   }
   
   delete[] timesteps;
