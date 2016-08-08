@@ -143,9 +143,9 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("vtk", 0, "Dump mesh to VTK files",
 			utils::Args::Required, false);
-  args.addOption("vertex_weights", 'v', "Use vertex weights",
+  args.addOption("vertex-weights", 'v', "Use vertex weights",
       utils::Args::No, false);
-  args.addOption("velocity_model", 0, "Velocity model configuration file for local time stepping",
+  args.addOption("velocity-model", 0, "Velocity model configuration file for local time stepping",
       utils::Args::Required, false);
 	args.addOption("weights", 'w', "Weights for partitions (Format: w0:w1:w2:...)",
 			utils::Args::Required, false);
@@ -187,8 +187,8 @@ int main(int argc, char* argv[])
 	}
   
   // Check velocity model
-  bool enableVertexWeights = args.getArgument<bool>("vertex_weights", false);
-  const char* velocityModelStr = args.getArgument<const char*>("velocity_model", "");
+  bool enableVertexWeights = args.getArgument<bool>("vertex-weights", false);
+  const char* velocityModelStr = args.getArgument<const char*>("velocity-model", "");
   if (strlen(velocityModelStr) > 0) {
 #ifdef HAVE_PROJ4
     if (!enableVertexWeights) {
