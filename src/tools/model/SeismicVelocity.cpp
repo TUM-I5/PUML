@@ -4,7 +4,7 @@
 #include <cstdio>
 #include <cmath>
 
-/*static double const Layers[] = { -100., -300., -1000., -3000., -6000., -31000. };
+static double const Layers[] = { -100., -300., -1000., -3000., -6000., -31000. };
 // vp, vs, density
 static double const LayerLameParams[][3] = {
   {1925.9102873142, 876.2568612893, 2300.0000000000},
@@ -14,14 +14,14 @@ static double const LayerLameParams[][3] = {
   {5922.6430205131, 3288.7200310316, 2870.0000000000},
   {5933.4162648030, 3374.1453944454, 3500.0000000000},
   {7800.0000000000, 4500.0000000000, 3200.0000000000}
-};*/
+};
 
-static double const Layers[] = { -2000. };
+/*static double const Layers[] = { -2000. };
 // vp, vs, density
 static double const LayerLameParams[][3] = {
   {4000.0, 2000.0, 2600.0},
   {6000.0, 3464.0, 2700.0}
-};
+};*/
 
 void get_material_parameters(double* lat, double* lon, double* height, unsigned numberOfPoints, unsigned mask, double* values)
 {

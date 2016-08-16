@@ -145,6 +145,7 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
   args.addOption("vertex-weights", 'v', "Use vertex weights",
       utils::Args::No, false);
+  args.addOption("dr-weights", 'r', "Enable dynamic rupture weights", utils::Args::No, false);
   args.addOption("velocity-model", 0, "Velocity model configuration file for local time stepping",
       utils::Args::Required, false);
 	args.addOption("weights", 'w', "Weights for partitions (Format: w0:w1:w2:...)",
@@ -188,6 +189,7 @@ int main(int argc, char* argv[])
   
   // Check velocity model
   bool enableVertexWeights = args.getArgument<bool>("vertex-weights", false);
+  bool enableDRWeights = args.getArgument<bool>("dr-weights", false);
   const char* velocityModelStr = args.getArgument<const char*>("velocity-model", "");
   if (strlen(velocityModelStr) > 0) {
 #ifdef HAVE_PROJ4
@@ -345,7 +347,7 @@ int main(int argc, char* argv[])
   if (enableVertexWeights) {
     // wgtflag = 3;
     wgtflag = 2;
-    vwgt = computeVertexWeights(mesh, velocityModelStr, ncon);
+    vwgt = computeVertexWeights(mesh, velocityModelStr, ncon, enableDRWeights);
     // adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
   }
 
