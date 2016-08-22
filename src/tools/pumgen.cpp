@@ -806,7 +806,7 @@ int main(int argc, char* argv[])
 			}
 
 			// For collective I/O
-			for (; bndCount < maxSize[3]; bndCount++) {
+			for (; bndCount < maxSize[2]; bndCount++) {
 				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
 				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
 
