@@ -325,7 +325,7 @@ int main(int argc, char* argv[])
 	sumWeights = (static_cast<real_t>(nPartitions) / static_cast<real_t>(weights.size())) * sumWeights;
 
 	for(std::vector<real_t>::const_iterator it = weights.begin(); it != weights.end(); ++it)
-		logInfo() << "Using ratio: " << (*it) / sumWeights;
+		logInfo(rank) << "Using ratio: " << (*it) / sumWeights;
 
 	real_t* tpwgts = new real_t[nPartitions];
 	for (unsigned int i = 0; i < nPartitions; i++)
