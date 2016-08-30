@@ -6,7 +6,7 @@
 #  For conditions of distribution and use, please see the copyright
 #  notice in the file 'COPYING' at the root directory of this package
 #  and the copyright notice at https://github.com/TUM-I5/PUML
-# 
+#
 # @copyright 2013 Technische Universitaet Muenchen
 # @author Sebastian Rettenberger <rettenbs@in.tum.de>
 #
@@ -26,11 +26,11 @@ vars.AddVariables(
 env = Environment(variables=vars)
 if 'buildVariablesFile' in env:
   vars = Variables(env['buildVariablesFile'])
-  
+
 # PUML specific variables
 vars.AddVariables(
   PathVariable( 'buildDir', 'where to build the code', 'build', PathVariable.PathIsDirCreate ),
-  
+
   EnumVariable( 'compileMode', 'mode of the compilation', 'release',
                 allowed_values=('debug', 'release')
               ),
@@ -38,7 +38,7 @@ vars.AddVariables(
   EnumVariable( 'parallelization', 'level of parallelization', 'none',
                 allowed_values=('none', 'mpi')
               ),
-  
+
   BoolVariable( 'unitTests', 'builds additional unit tests',
                 False
               ),
@@ -48,11 +48,11 @@ vars.AddVariables(
                 'info',
                 allowed_values=('debug', 'info', 'warning', 'error')
               ),
-                  
+
   BoolVariable( 'simModSuite', 'compile with support for simModSuite from Simmetrix',
                 False
               ),
-                  
+
   ( 'mpiLib', 'MPI library against this is linked (only required for simModSuite)',
                 'mpich2',
                 None, None
@@ -64,17 +64,17 @@ env.Tool('PrefixPathTool')
 # external variables
 vars.AddVariables(
   env['PREFIX_PATH_VARIABLE'],
-                  
+
   PathVariable( 'cc',
                 'C compiler (default: gcc (serial), mpicc (parallel))',
                 None,
                 PathVariable.PathAccept ),
-                  
+
   PathVariable( 'cxx',
                 'C++ compiler (default: g++ (serial), mpiCC (parallel))',
                 None,
                 PathVariable.PathAccept ),
-                
+
   BoolVariable( 'useEnv',
                 'set variables set in the execution environment',
                 True )
@@ -86,19 +86,19 @@ if '-h' in sys.argv or '--help' in sys.argv:
   import SCons
   print SCons.Script.help_text
   env.Exit()
-  
+
 # handle unknown, maybe misspelled variables
 unknownVariables = vars.UnknownVariables()
 
 # remove the buildVariablesFile from the list of unknown variables (used before)
 if 'buildVariablesFile' in unknownVariables:
   unknownVariables.pop('buildVariablesFile')
-  
+
 # exit in the case of unknown variables
 if unknownVariables:
   print "*** The following build variables are unknown: " + str(unknownVariables.keys())
   env.Exit(1)
-  
+
 # set environment
 env = Environment(variables=vars)
 
@@ -185,14 +185,13 @@ env.tools.Append(CPPPATH=['#/submodules'])
 #env.tools.Append(LIBPATH=[os.path.split(env['libFile'])[0]])
 env.tools.Append(CXXFLAGS = ['-fopenmp'])
 env.tools.Append(LINKFLAGS= ['-fopenmp'])
-env.tools.Append(LIBS='imf')
 # (Par)METIS
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 
 if env['parallelization'] in ['mpi']:
     # APF
     env.tools.Tool('ApfTool', required=True, sim=env['simModSuite'])
-        
+
     # SimModSuite
     if env['simModSuite']:
         env.tools.Tool('SimModSuiteTool', mpiLib=env['mpiLib'], required=True)
@@ -224,21 +223,21 @@ if env['unitTests']:
 
     # define location of cxxtest
     env['CXXTEST'] = 'submodules/cxxtest'
- 
+
     # Continue testing if tests fail
     env['CXXTEST_SKIP_ERRORS'] = True
-  
+
     # Parallel tests?
     if env['parallelization'] in ['mpi']:
         env['CXXTEST_COMMAND'] = 'mpiexec -np 2 %t'
         env['CXXTEST_OPTS'] = ['--main=cxxtest_main']
-  
+
     # add cxxtest-tool
     env.Tool('cxxtest', toolpath=[env['CXXTEST']+'/build_tools/SCons'])
-   
+
     # Get test source files
     env.sourceFiles['tests'] = []
-  
+
     Export('env')
     SConscript('tests/SConscript', variant_dir='#/'+env['buildDir']+'/tests', src_dir='#/')
     Import('env')
