@@ -360,7 +360,7 @@ int main(int argc, char* argv[])
 	sumWeights = (static_cast<real_t>(nPartitions) / static_cast<real_t>(weights.size())) * sumWeights;
 
 	for(std::vector<real_t>::const_iterator it = weights.begin(); it != weights.end(); ++it)
-		logInfo() << "Using ratio: " << (*it) / sumWeights;
+		logInfo(rank) << "Using ratio: " << (*it) / sumWeights;
 
 	real_t* tpwgts = new real_t[2*nPartitions];
 	for (unsigned int i = 0; i < nPartitions; i++) {
@@ -846,7 +846,7 @@ int main(int argc, char* argv[])
 			}
 
 			// For collective I/O
-			for (; bndCount < maxSize[3]; bndCount++) {
+			for (; bndCount < maxSize[2]; bndCount++) {
 				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemSize, start, &size));
 				checkNcError(nc_put_var1_int(ncFile, ncVarBndElemRank, start, &remoteRank));
 
