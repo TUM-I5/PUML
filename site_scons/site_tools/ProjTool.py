@@ -48,13 +48,13 @@ def generate(env, **kw):
         required = False
         
     if not conf.CheckLibWithHeader('proj', 'proj_api.h', 'c'):
+      conf.env.Append(have_proj4 = False)
       if required:
         print 'Could not find Proj4!'
         env.Exit(1)
       else:
         conf.Finish()
         return
-      conf.env.Append(have_proj4 = False)
     else:
       conf.env.Append(CPPDEFINES='-DHAVE_PROJ4')
       conf.env.Append(have_proj4 = True)
