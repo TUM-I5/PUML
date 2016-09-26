@@ -54,10 +54,10 @@ def generate(env, **kw):
       else:
         conf.Finish()
         return
-      conf.env['have_proj4'] = False
+      conf.env.Append(have_proj4 = False)
     else:
       conf.env.Append(CPPDEFINES='-DHAVE_PROJ4')
-      conf.env['have_proj4'] = True
+      conf.env.Append(have_proj4 = True)
             
     conf.Finish()
 
