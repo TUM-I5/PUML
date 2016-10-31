@@ -34,7 +34,7 @@ def tryLibPath(env, conf, libPath, mpiWrapper, setRpath):
 
         # TODO not all libraries may be available/required
         # TODO different parasolid versions not handled currently
-        libs = ['SimField', 'SimDiscrete', 'SimAdvMeshing', 'SimMeshTools', 'SimParasolid270',
+        libs = ['SimField', 'SimDiscrete', 'SimAdvMeshing', 'SimMeshTools', ['SimParasolid260', 'SimParasolid270', 'SimParasolid280'],
                 'SimPartitionedMesh-mpi', 'SimPartitionWrapper-'+mpiWrapper, 'SimModel', 'pskernel']
         for l in libs:
             if not conf.CheckLib(l):
