@@ -22,23 +22,34 @@ def tryLibPath(env, conf, libPath, mpiWrapper, setRpath):
     try:
         env.AppendUnique(LIBPATH=libPath)
 
-        # TODO check which headers belong to which library
-        if not conf.CheckLibWithHeader('SimMeshing', 'MeshSim.h', 'c++'):
-            return False
-
         # Add path for parasolid library
         psLibPath = [p for p in map(lambda p: os.path.join(p, 'psKrnl'), env['LIBPATH']) if os.path.exists(p)]
         env.AppendUnique(LIBPATH=psLibPath)
         if setRpath:
             env.AppendUnique(RPATH=psLibPath)
 
+        # TODO check all headers
         # TODO not all libraries may be available/required
-        # TODO different parasolid versions not handled currently
-        libs = ['SimField', 'SimDiscrete', 'SimAdvMeshing', 'SimMeshTools', ['SimParasolid260', 'SimParasolid270', 'SimParasolid280'],
-                'SimPartitionedMesh-mpi', 'SimPartitionWrapper-'+mpiWrapper, 'SimModel', 'pskernel']
+        libs = [
+            ('SimAdvMeshing', 'SimAdvMeshing.h'),
+            ('SimMeshing', 'MeshSim.h'),
+            ('SimField', 'SimField.h'),
+            ('SimDiscrete', 'SimDiscrete.h'),
+            ('SimMeshTools', 'SimMeshTools.h'),
+            (['SimParasolid260', 'SimParasolid270', 'SimParasolid280'], None),
+            ('SimPartitionedMesh-mpi', 'SimPartitionedMesh.h'),
+            ('SimPartitionWrapper-'+mpiWrapper, None),
+            ('SimModel', 'SimModel.h'),
+            ('pskernel', None)
+        ]
+
         for l in libs:
-            if not conf.CheckLib(l):
-                return False
+            if l[1]:
+                if not conf.CheckLibWithHeader(l[0], l[1], 'c++'):
+                    return False
+            else:
+                if not conf.CheckLib(l[0]):
+                    return False
 
         success = True
     finally:
