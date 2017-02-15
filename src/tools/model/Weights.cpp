@@ -27,17 +27,18 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
   return cluster;
 }
 
-idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx_t& ncon, bool enableDRWeights)
+idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx_t& ncon, int drToCellRatio, bool enableDRWeights)
 {
   unsigned nLocalElements = apf::countOwned(mesh, 3);
   double* timesteps = new double[nLocalElements];
-  bool* dynamicRupture = new bool[nLocalElements];
+  int* dynamicRupture = new int[nLocalElements];
   double localMinTimestep = std::numeric_limits<double>::max();
   double localMaxTimestep = std::numeric_limits<double>::min();
-  double globalMinTimestep, globalMaxTimestep;
+  double drLocalMinTimestep = std::numeric_limits<double>::max();
+  double globalMinTimestep, globalMaxTimestep, drGlobalMinTimestep;
   int localNumDrFaces = 0, globalNumDrFaces;
   
-  std::fill(dynamicRupture, dynamicRupture + nLocalElements, false);
+  std::fill(dynamicRupture, dynamicRupture + nLocalElements, 0);
   
   if (strlen(sourceCoordSystem) > 0) {
     double* lat = new double[nLocalElements];
@@ -113,13 +114,20 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx
       if (boundaryTag && mesh->hasTag(faces[f], boundaryTag)) {
         int boundary;
         mesh->getIntTag(faces[f], boundaryTag, &boundary);
-        dynamicRupture[iElem] = dynamicRupture[iElem] || (boundary == 3);
+        dynamicRupture[iElem] += (boundary == 3) ? 1 : 0;
       }
     }
-    localNumDrFaces += (dynamicRupture[iElem]) ? 1 : 0;
+    if (dynamicRupture[iElem] > 0) {
+      drLocalMinTimestep = std::min(drLocalMinTimestep, timesteps[iElem]);
+      localNumDrFaces = 1;
+    } else {
+      localNumDrFaces = 0;
+    }
     ++iElem;
   }
 	mesh->end(it);
+  
+  MPI_Allreduce(&drLocalMinTimestep, &drGlobalMinTimestep, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD);  
   
   if (enableDRWeights) {
     MPI_Allreduce(&localNumDrFaces, &globalNumDrFaces, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);  
@@ -130,11 +138,14 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx
   unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, 2);
   idx_t* vwgt = new idx_t[ncon*nLocalElements];
   for (iElem = 0; iElem < nLocalElements; ++iElem) {
-    vwgt[ncon*iElem] = (1 << (maxCluster - getCluster(timesteps[iElem], globalMinTimestep, 2))); // Valid for rate 2
+    double timestep = (dynamicRupture[iElem] == 0) ? timesteps[iElem] : drGlobalMinTimestep;
+    // Actually the plus cell does all the work but I think this cannot
+    // be adequately modeled here.
+    vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture[iElem]) * (1 << (maxCluster - getCluster(timestep, globalMinTimestep, 2))); // Valid for rate 2
   }
   if (ncon > 1) {
     for (iElem = 0; iElem < nLocalElements; ++iElem) {
-      vwgt[ncon*iElem+1] = (dynamicRupture[iElem]) ? 1 : 0;
+      vwgt[ncon*iElem+1] = (dynamicRupture[iElem] > 0) ? 1 : 0;
     }
   }
   
