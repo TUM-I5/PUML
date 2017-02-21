@@ -14,10 +14,13 @@
 import os
 import sys
 
+import libs
+import utils.variables
+
 #
 # set possible variables
 #
-vars = Variables()
+vars = utils.variables.Variables()
 
 # read parameters from a file if given
 vars.AddVariables(
@@ -25,7 +28,9 @@ vars.AddVariables(
 )
 env = Environment(variables=vars)
 if 'buildVariablesFile' in env:
-  vars = Variables(env['buildVariablesFile'])
+  vars = utils.variables.Variables(env['buildVariablesFile'])
+
+vars.AddPrefixPathVariable()
 
 # PUML specific variables
 vars.AddVariables(
@@ -59,12 +64,8 @@ vars.AddVariables(
               )
 )
 
-env.Tool('PrefixPathTool')
-
 # external variables
 vars.AddVariables(
-  env['PREFIX_PATH_VARIABLE'],
-
   PathVariable( 'cc',
                 'C compiler (default: gcc (serial), mpicc (parallel))',
                 None,
@@ -81,7 +82,7 @@ vars.AddVariables(
 )
 
 # generate help text
-Help(vars.GenerateHelpText(env))
+vars.SetHelpText(env)
 if '-h' in sys.argv or '--help' in sys.argv:
   import SCons
   print SCons.Script.help_text
@@ -154,11 +155,11 @@ elif env['compileMode'] == 'release':
 # add pathname to the list of directories which are search for include
 env.Append(CPPPATH=['#/src'])
 
-# Add prefix path
-env.Tool('PrefixPathTool')
+# Set prefix pathes for libraries
+vars.SetPrefixPathes(env)
 
 # netCDF
-env.Tool('NetcdfTool', parallel=(env['parallelization'] in ['mpi']), required=True)
+libs.find(env, 'netcdf', parallel=(env['parallelization'] in ['mpi']))
 
 # proj.4
 #env.Tool('ProjTool', required=False)
@@ -189,8 +190,8 @@ env.tools.Append(LINKFLAGS= ['-fopenmp'])
 env.tools.Tool('MetisTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 
 if env['parallelization'] in ['mpi']:
-    # APF
-    env.tools.Tool('ApfTool', required=True, sim=env['simModSuite'])
+    # APF (one of the Zoltan functions is required)
+    libs.find(env.tools, 'apf', simmetrix=env['simModSuite'], zoltan=True)
 
     # SimModSuite
     if env['simModSuite']:

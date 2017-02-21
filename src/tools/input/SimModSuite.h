@@ -6,7 +6,7 @@
  *  notice in the file 'COPYING' at the root directory of this package
  *  and the copyright notice at https://github.com/TUM-I5/PUML
  *
- * @copyright 2014-2015 Technische Universitaet Muenchen
+ * @copyright 2014-2017 Technische Universitaet Muenchen
  * @author Sebastian Rettenberger <rettenbs@in.tum.de>
  */
 
@@ -34,13 +34,13 @@
 #include <SimError.h>
 #include <SimErrorCodes.h>
 #include <SimMeshingErrorCodes.h>
+#include <SimModelerUtil.h>
 
 #include "utils/logger.h"
 #include "utils/path.h"
 #include "utils/progress.h"
 
 #include "MeshInput.h"
-#include "SimModelerUtil.h"
 
 //forward declare
 pAManager SModel_attManager(pModel model);
@@ -113,7 +113,7 @@ public:
 
 		MeshingOptions meshingOptions;
 		pACase meshCase = MS_newMeshCase(m_model);
-		MS_setupSimModelerMeshCase(extractCase(attMngr, meshCaseName),
+		MS_processSimModelerMeshingAtts(extractCase(attMngr, meshCaseName),
 				meshCase, &meshingOptions);
 
 		pACase analysisCase = extractCase(attMngr, analysisCaseName);
