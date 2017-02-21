@@ -3,6 +3,9 @@
 .project
 .pydevproject
 
+# KDevelop stuff
+*.kdev4
+
 # SCons stuff
 .sconf_temp/
 .sconsign.dblite
