@@ -161,7 +161,7 @@ env.Tool('PrefixPathTool')
 env.Tool('NetcdfTool', parallel=(env['parallelization'] in ['mpi']), required=True)
 
 # proj.4
-env.Tool('ProjTool', required=False)
+#env.Tool('ProjTool', required=False)
 
 #
 # setup the library name and the build directory

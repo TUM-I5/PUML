@@ -40,9 +40,7 @@
 #include "meshreader/ParallelGambitReader.h"
 #include "meshreader/ParallelFidapReader.h"
 
-#ifdef HAVE_PROJ4
 #include "model/Weights.h"
-#endif
 
 const static unsigned int FACE2INTERNAL[] = {0, 1, 3, 2};
 
@@ -147,7 +145,7 @@ int main(int argc, char* argv[])
       utils::Args::No, false);
   args.addOption("dr-multi-constraint", 'r', "Enable dynamic rupture weights (multi-constraint)", utils::Args::No, false);
   args.addOption("dr-to-cell-ratio", 0, "Weight dynamic faces with this ratio vs tets", utils::Args::Required, false);
-  args.addOption("velocity-model", 0, "Velocity model configuration file for local time stepping",
+  args.addOption("velocity-model", 0, "Velocity model for local time stepping",
       utils::Args::Required, false);
 	args.addOption("weights", 'w', "Weights for partitions (Format: w0:w1:w2:...)",
 			utils::Args::Required, false);
@@ -195,16 +193,12 @@ int main(int argc, char* argv[])
   if (enableDRMultiConstraint && drToCellRatio != 0.0) {
     std::cerr << "Warning: You should not set dr-multi-constraint and dr-to-cell-ratio simultaneously." << std::endl;
   }
-  const char* velocityModelStr = args.getArgument<const char*>("velocity-model", "");
-  if (strlen(velocityModelStr) > 0) {
-#ifdef HAVE_PROJ4
+  const char* velocityModel = args.getArgument<const char*>("velocity-model", "");
+  if (strlen(velocityModel) > 0) {
     if (!enableVertexWeights) {
       logInfo() << "Enabling vertex weights due to velocity model.";
     }
     enableVertexWeights = true;
-#else
-    logError() << "Using velocity models requires proj.4.";
-#endif
   }
 
 	// Parse/check weigths
@@ -352,7 +346,7 @@ int main(int argc, char* argv[])
   if (enableVertexWeights) {
     // wgtflag = 3;
     wgtflag = 2;
-    vwgt = computeVertexWeights(mesh, velocityModelStr, ncon, drToCellRatio, enableDRMultiConstraint);
+    vwgt = computeVertexWeights(mesh, ncon, drToCellRatio, enableDRMultiConstraint, velocityModel);
     // adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
   }
 

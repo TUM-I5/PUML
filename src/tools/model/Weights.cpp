@@ -3,16 +3,11 @@
 #include <limits>
 #include <maMesh.h>
 #include <utils/logger.h>
-#include <projects.h>
 #include <parmetis.h>
-#include "SeismicVelocity.h"
+#include <fstream>
+#include <cstring>
 
-void projPrintLastError()
-{
-  if (pj_errno != 0) {
-    logError() << "Proj.4 error:" << pj_strerrno(pj_errno);
-  }
-}
+#include "SeismicVelocity.h"
 
 unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
 {
@@ -27,7 +22,7 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
   return cluster;
 }
 
-idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx_t& ncon, int drToCellRatio, bool enableDRWeights)
+idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int drToCellRatio, bool enableDRWeights, char const* velocityModel)
 {
   unsigned nLocalElements = apf::countOwned(mesh, 3);
   double* timesteps = new double[nLocalElements];
@@ -39,14 +34,21 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx
   int localNumDrFaces = 0, globalNumDrFaces;
   
   std::fill(dynamicRupture, dynamicRupture + nLocalElements, 0);
-  
-  if (strlen(sourceCoordSystem) > 0) {
-    double* lat = new double[nLocalElements];
-    double* lon = new double[nLocalElements];
-    double* height = new double[nLocalElements];
-  
+
+  if (strlen(velocityModel) > 0) {
+    double (*pWaveVelocityFun)(int,double,double,double);
+    if (strcmp(velocityModel, "landers61") == 0) {
+      pWaveVelocityFun = &landers61;
+    } else if (strcmp(velocityModel, "sumatra1224") == 0) {
+      pWaveVelocityFun = &sumatra1224;
+    } else {
+      std::cerr << "Error: Unknown velocity model." << std::endl;
+      exit(-1);
+    }
+
     // Compute barycenter of each tetrahedron
     unsigned iElem = 0;
+    apf::MeshTag* groupTag = mesh->findTag("group");
     apf::MeshIterator* it = mesh->begin(3);
     while (apf::MeshEntity* element = mesh->iterate(it)) {
       apf::Downward vertices;
@@ -57,37 +59,20 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, char const* sourceCoordSystem, idx
         mesh->getPoint(vertices[v], 0, x);
         barycenter += x * 0.25;
       }
-      lat[iElem] = barycenter.x();
-      lon[iElem] = barycenter.y();
-      height[iElem] = barycenter.z();
+      int group = -1;
+      if (groupTag && mesh->hasTag(element, groupTag)) {
+        mesh->getIntTag(element, groupTag, &group);
+      }
+      timesteps[iElem] = pWaveVelocityFun(group, barycenter.x(), barycenter.y(), barycenter.z());
+      if (timesteps[iElem] < 0.0) {
+        std::cerr << "Negative p wave velocity encountered." << std::endl;
+        exit(-1);
+      }
       ++iElem;
     }
     mesh->end(it);
-    
-    projPJ pj_lonlat;
-    projPJ pj_mesh;
-    // Transform from mesh coordinate system to latitude, longitude, height
-    if (!(pj_mesh = pj_init_plus(sourceCoordSystem))) { 
-      projPrintLastError();
-    }
-    if (!(pj_lonlat = pj_init_plus("+proj=latlon +datum=WGS84 +units=m +no_defs"))) {
-      projPrintLastError();
-    }
-
-    pj_transform(pj_mesh, pj_lonlat, nLocalElements, 1, lat, lon, height);
-    projPrintLastError();
-
-    pj_free(pj_lonlat);
-    pj_free(pj_mesh);
-    
-    // Compute maximum wave velocity (= P wave)
-    get_material_parameters(lat, lon, height, nLocalElements, Vp, timesteps);
-    
-    delete[] lat;
-    delete[] lon;
-    delete[] height;
   } else {
-    std::fill(timesteps, timesteps + nLocalElements, 1.0);    
+    std::fill(timesteps, timesteps + nLocalElements, 1.0);
   }
   
   // Compute timesteps
