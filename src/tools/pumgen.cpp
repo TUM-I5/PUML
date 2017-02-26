@@ -141,8 +141,8 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("vtk", 0, "Dump mesh to VTK files",
 			utils::Args::Required, false);
-  args.addOption("vertex-weights", 'v', "Use vertex weights",
-      utils::Args::No, false);
+  args.addOption("vertex-weights", 'v', "Use vertex weights (pass cluster rate, e.g. 1 for GTS and 2 for rate-2 LTS).",
+      utils::Args::Required, false);
   args.addOption("dr-multi-constraint", 'r', "Enable dynamic rupture weights (multi-constraint)", utils::Args::No, false);
   args.addOption("dr-to-cell-ratio", 0, "Weight dynamic faces with this ratio vs tets", utils::Args::Required, false);
   args.addOption("velocity-model", 0, "Velocity model for local time stepping",
@@ -187,7 +187,7 @@ int main(int argc, char* argv[])
 	}
   
   // Check velocity model
-  bool enableVertexWeights = args.getArgument<bool>("vertex-weights", false);
+  int enableVertexWeights = args.getArgument<int>("vertex-weights", 0);
   bool enableDRMultiConstraint = args.getArgument<bool>("dr-multi-constraint", false);
   int drToCellRatio = args.getArgument<int>("dr-to-cell-ratio", 0);
   if (enableDRMultiConstraint && drToCellRatio != 0.0) {
@@ -195,10 +195,10 @@ int main(int argc, char* argv[])
   }
   const char* velocityModel = args.getArgument<const char*>("velocity-model", "");
   if (strlen(velocityModel) > 0) {
-    if (!enableVertexWeights) {
-      logInfo() << "Enabling vertex weights due to velocity model.";
+    if (enableVertexWeights == 0) {
+      logError() << "Vertex weights must be enabled when velocity model is given.";
+      return -1;
     }
-    enableVertexWeights = true;
   }
 
 	// Parse/check weigths
@@ -343,10 +343,10 @@ int main(int argc, char* argv[])
   // Vertex weights
   idx_t* vwgt = 0L;
   idx_t* adjwgt = 0L;
-  if (enableVertexWeights) {
+  if (enableVertexWeights > 0) {
     // wgtflag = 3;
     wgtflag = 2;
-    vwgt = computeVertexWeights(mesh, ncon, drToCellRatio, enableDRMultiConstraint, velocityModel);
+    vwgt = computeVertexWeights(mesh, ncon, enableVertexWeights, drToCellRatio, enableDRMultiConstraint, velocityModel);
     // adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
   }
 

@@ -6,11 +6,16 @@
 #include <parmetis.h>
 #include <fstream>
 #include <cstring>
+#include <cassert>
 
 #include "SeismicVelocity.h"
 
 unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
 {
+  if (rate == 1) {
+    return 0;
+  }
+  
   double upper;
   upper = rate * globalMinTimestep;
   
@@ -22,7 +27,20 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
   return cluster;
 }
 
-idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int drToCellRatio, bool enableDRWeights, char const* velocityModel)
+int ipow(int x, int y) {
+  assert(y > 0);
+
+  if (y == 0) {
+    return 1;
+  }
+  int result = x;
+  while(--y) {
+    result *= x;
+  }
+  return result;
+}
+
+idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int drToCellRatio, bool enableDRWeights, char const* velocityModel)
 {
   unsigned nLocalElements = apf::countOwned(mesh, 3);
   double* timesteps = new double[nLocalElements];
@@ -120,13 +138,13 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int drToCellRatio, bo
   } else {
     ncon = 1;
   }
-  unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, 2);
+  unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, timestepRate);
   idx_t* vwgt = new idx_t[ncon*nLocalElements];
   for (iElem = 0; iElem < nLocalElements; ++iElem) {
     double timestep = (dynamicRupture[iElem] == 0) ? timesteps[iElem] : drGlobalMinTimestep;
     // Actually the plus cell does all the work but I think this cannot
     // be adequately modeled here.
-    vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture[iElem]) * (1 << (maxCluster - getCluster(timestep, globalMinTimestep, 2))); // Valid for rate 2
+    vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture[iElem]) * ipow(timestepRate, maxCluster - getCluster(timestep, globalMinTimestep, timestepRate));
   }
   if (ncon > 1) {
     for (iElem = 0; iElem < nLocalElements; ++iElem) {
