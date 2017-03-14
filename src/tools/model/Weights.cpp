@@ -57,6 +57,8 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
     double (*pWaveVelocityFun)(int,double,double,double);
     if (strcmp(velocityModel, "landers61") == 0) {
       pWaveVelocityFun = &landers61;
+    } else if (strcmp(velocityModel, "sumatra1223") == 0) {
+      pWaveVelocityFun = &sumatra1223;
     } else if (strcmp(velocityModel, "sumatra1224") == 0) {
       pWaveVelocityFun = &sumatra1224;
     } else {
