@@ -178,15 +178,18 @@ int enforceDynamicRuptureGTS(apf::Mesh2* mesh)
   return numberOfReductions;
 }
 
-int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
+int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
 {
 	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
   apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
+  apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
 
   int numberOfReductions = 0;
 
   apf::MeshIterator* it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
+    int difference = maxDifference;
+
     int timeCluster;
     mesh->getIntTag(element, clusterTag, &timeCluster);
 
@@ -211,10 +214,16 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
 
           apf::MeshEntity* neighbour = (elements.e[0] == element) ? elements.e[1] : elements.e[0];
           int otherTimeCluster;
+          int otherDynamicRupture;
           mesh->getIntTag(neighbour, clusterTag, &otherTimeCluster);
+          mesh->getIntTag(neighbour, dynRupTag, &otherDynamicRupture);
+          
+          if (otherDynamicRupture > 0) {
+            difference = 0;
+          }
 
-          if (timeCluster > otherTimeCluster + maxDifference) {
-            timeCluster = otherTimeCluster + maxDifference;
+          if (timeCluster > otherTimeCluster + difference) {
+            timeCluster = otherTimeCluster + difference;
             ++numberOfReductions;
           }
         }
@@ -239,16 +248,25 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
 			int timeCluster;
 			mesh->getIntTag(element, clusterTag, &timeCluster);
 			PCU_COMM_PACK(other.peer, timeCluster);
+			int dynamicRupture;
+			mesh->getIntTag(element, dynRupTag, &dynamicRupture);
+			PCU_COMM_PACK(other.peer, dynamicRupture);
 		}
 	}
 	mesh->end(it);
 	PCU_Comm_Send();
 
 	while (PCU_Comm_Receive()) {
+    int difference = maxDifference;
+
 		apf::MeshEntity* face;
 		PCU_COMM_UNPACK(face);
-		int otherTimeCluster, timeCluster;
+		int otherTimeCluster, otherDynamicRupture, timeCluster;
 		PCU_Comm_Unpack(&otherTimeCluster, sizeof(otherTimeCluster));
+		PCU_Comm_Unpack(&otherDynamicRupture, sizeof(otherDynamicRupture));    
+    if (otherDynamicRupture > 0) {
+      difference = 0;
+    }
 
     apf::Up elements;
     mesh->getUp(face, elements);
@@ -257,8 +275,8 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
       MPI_Abort(MPI_COMM_WORLD, -1);
     }
     mesh->getIntTag(elements.e[0], clusterTag, &timeCluster);
-    if (timeCluster > otherTimeCluster + maxDifference) {
-      timeCluster = otherTimeCluster + maxDifference;
+    if (timeCluster > otherTimeCluster + difference) {
+      timeCluster = otherTimeCluster + difference;
       mesh->setIntTag(elements.e[0], clusterTag, &timeCluster);
       ++numberOfReductions;
     }
@@ -273,13 +291,14 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   unsigned nLocalElements = apf::countOwned(mesh, 3);
-  idx_t* vwgt = new idx_t[ncon*nLocalElements];
   double globalMinTimestep, globalMaxTimestep;
   int globalNumDrFaces;
 
+  logInfo(rank) << "Computing timesteps";
   computeTimesteps(mesh, velocityModel, globalMinTimestep, globalMaxTimestep);
   countDynamicRuptureFaces(mesh, globalNumDrFaces);
 
+  logInfo(rank) << "Determining time clusters";
 	apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
 	apf::MeshTag* timestepTag = mesh->findTag("timestep");
 	apf::MeshTag* clusterTag = mesh->createIntTag("timeCluster", 1);
@@ -293,6 +312,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
   mesh->end(it);
 
   if (timestepRate > 1) {
+    logInfo(rank) << "Normalizing time clusters";
     int totalNumberOfReductions = 0;
     int localNumberOfReductions, globalNumberOfReductions;
     do {
@@ -300,7 +320,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
       if (globalNumDrFaces > 0) {
         localNumberOfReductions += enforceDynamicRuptureGTS(mesh);
       }
-      localNumberOfReductions += normalizeClustering(mesh);
+      localNumberOfReductions += enforceMaximumDifference(mesh);
 
       MPI_Allreduce(&localNumberOfReductions, &globalNumberOfReductions, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
       totalNumberOfReductions += globalNumberOfReductions;
@@ -314,25 +334,44 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
   } else {
     ncon = 1;
   }
-
+  
+  idx_t* vwgt = new idx_t[ncon*nLocalElements];
   unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, timestepRate);
+  int* localClusterHistogram = new int[maxCluster+1];
+  int* globalClusterHistogram;
+  if (rank == 0) {
+    globalClusterHistogram = new int[maxCluster+1];
+  }
+  for (int cluster = 0; cluster <= maxCluster; ++cluster) {
+    localClusterHistogram[cluster] = 0;
+  }
   unsigned iElem = 0;
   it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
     int timeCluster, dynamicRupture;
     mesh->getIntTag(element, clusterTag, &timeCluster);
     mesh->getIntTag(element, dynRupTag, &dynamicRupture);
+    ++localClusterHistogram[timeCluster];
+    
+    // Actually the plus cell does all the work but I think this cannot
+    // be adequately modeled here.
+    vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture) * ipow(timestepRate, maxCluster - timeCluster);
     if (ncon > 1) {
-      vwgt[ncon*iElem] = ipow(timestepRate, maxCluster - timeCluster);
       vwgt[ncon*iElem+1] = (dynamicRupture > 0) ? 1 : 0;
-    } else {
-      // Actually the plus cell does all the work but I think this cannot
-      // be adequately modeled here.
-      vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture) * ipow(timestepRate, maxCluster - timeCluster);
     }
     ++iElem;
   }
 	mesh->end(it);
+  
+  MPI_Reduce(localClusterHistogram, globalClusterHistogram, maxCluster+1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+  if (rank == 0) {
+    logInfo(rank) << "Number of elements in time clusters:";
+    for (int cluster = 0; cluster <= maxCluster; ++cluster) {
+      logInfo(rank) << utils::nospace << cluster << ":" << utils::space << globalClusterHistogram[cluster];
+    }
+    delete[] globalClusterHistogram;
+  }  
+  delete[] localClusterHistogram;
 
   return vwgt;
 }

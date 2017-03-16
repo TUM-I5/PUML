@@ -190,7 +190,7 @@ int main(int argc, char* argv[])
   int enableVertexWeights = args.getArgument<int>("vertex-weights", 0);
   bool enableDRMultiConstraint = args.getArgument<bool>("dr-multi-constraint", false);
   int drToCellRatio = args.getArgument<int>("dr-to-cell-ratio", 0);
-  if (enableDRMultiConstraint && drToCellRatio != 0.0) {
+  if (enableDRMultiConstraint && drToCellRatio != 0) {
     std::cerr << "Warning: You should not set dr-multi-constraint and dr-to-cell-ratio simultaneously." << std::endl;
   }
   const char* velocityModel = args.getArgument<const char*>("velocity-model", "");
