@@ -115,7 +115,6 @@ void computeTimesteps(apf::Mesh2* mesh, char const* velocityModel, double& globa
 
 void countDynamicRuptureFaces(apf::Mesh2* mesh, int& globalNumDrFaces)
 {
-  double drLocalMinTimestep = std::numeric_limits<double>::max();
   int localNumDrFaces = 0;
 	apf::MeshTag* dynRupTag = mesh->createIntTag("dynamicRupture", 1);
   apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
@@ -148,7 +147,6 @@ int enforceDynamicRuptureGTS(apf::Mesh2* mesh)
 
 	apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
 	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
-  apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
 
   int localMinCluster = std::numeric_limits<int>::max(), globalMinCluster;
   apf::MeshIterator* it = mesh->begin(3);
