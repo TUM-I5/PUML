@@ -16,10 +16,10 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
   if (rate == 1) {
     return 0;
   }
-  
+
   double upper;
   upper = rate * globalMinTimestep;
-  
+
   unsigned cluster = 0;
   while (upper <= timestep) {
     upper *= rate;
@@ -52,7 +52,12 @@ void computeTimesteps(apf::Mesh2* mesh, char const* velocityModel, double& globa
     if (strcmp(velocityModel, "landers61") == 0) {
       pWaveVelocityFun = &landers61;
     } else if (strcmp(velocityModel, "sumatra1223") == 0) {
-      pWaveVelocityFun = &sumatra1223;
+	pWaveVelocityFun = 0L;
+	logError() << "Obsolete velocity model, use \"sumatra1223_high\" or \"sumatra1223_low\"";
+    } else if (strcmp(velocityModel, "sumatra1223_high") == 0) {
+      pWaveVelocityFun = &sumatra1223_high;
+    } else if (strcmp(velocityModel, "sumatra1223_low") == 0) {
+      pWaveVelocityFun = &sumatra1223_low;
     } else if (strcmp(velocityModel, "sumatra1224") == 0) {
       pWaveVelocityFun = &sumatra1224;
     } else {
@@ -140,26 +145,26 @@ void countDynamicRuptureFaces(apf::Mesh2* mesh, int& globalNumDrFaces)
 int enforceDynamicRuptureGTS(apf::Mesh2* mesh)
 {
   int numberOfReductions = 0;
-  
+
 	apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
 	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
   apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
-  
+
   int localMinCluster = std::numeric_limits<int>::max(), globalMinCluster;
   apf::MeshIterator* it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
     int dynamicRupture;
     mesh->getIntTag(element, dynRupTag, &dynamicRupture);
-    if (dynamicRupture > 0) {      
+    if (dynamicRupture > 0) {
       int timeCluster;
       mesh->getIntTag(element, clusterTag, &timeCluster);
       localMinCluster = std::min(localMinCluster, timeCluster);
     }
   }
 	mesh->end(it);
-  
+
   MPI_Allreduce(&localMinCluster, &globalMinCluster, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-  
+
   it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
     int dynamicRupture, timeCluster;
@@ -171,7 +176,7 @@ int enforceDynamicRuptureGTS(apf::Mesh2* mesh)
     }
   }
 	mesh->end(it);
-  
+
   return numberOfReductions;
 }
 
@@ -181,7 +186,7 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
   apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
 
   int numberOfReductions = 0;
-  
+
   apf::MeshIterator* it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
     int timeCluster;
@@ -189,7 +194,7 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
 
     apf::Downward faces;
     mesh->getDownward(element, 2, faces);
-    for (unsigned f = 0; f < 4; ++f) {      
+    for (unsigned f = 0; f < 4; ++f) {
       int boundary = -1;
       if (mesh->hasTag(faces[f], boundaryTag)) {
         mesh->getIntTag(faces[f], boundaryTag, &boundary);
@@ -197,19 +202,19 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
       // Continue for regular, dynamic rupture, and periodic boundary cells
       if (boundary == -1 || boundary == 3 || boundary == 6) {
         // We treat MPI neighbours later
-        if (!mesh->isShared(faces[f])) {   
+        if (!mesh->isShared(faces[f])) {
           apf::Up elements;
           mesh->getUp(faces[f], elements);
-          
-          if (elements.n != 2) {            
+
+          if (elements.n != 2) {
             std::cerr << "Could not find a face neighbour." << std::endl;
             MPI_Abort(MPI_COMM_WORLD, -1);
           }
-          
+
           apf::MeshEntity* neighbour = (elements.e[0] == element) ? elements.e[1] : elements.e[0];
           int otherTimeCluster;
           mesh->getIntTag(neighbour, clusterTag, &otherTimeCluster);
-          
+
           if (timeCluster > otherTimeCluster + maxDifference) {
             timeCluster = otherTimeCluster + maxDifference;
             ++numberOfReductions;
@@ -220,7 +225,7 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
     mesh->setIntTag(element, clusterTag, &timeCluster);
   }
   mesh->end(it);
-  
+
   PCU_Comm_Begin();
 	it = mesh->begin(3);
 	while (apf::MeshEntity* element = mesh->iterate(it)) {
@@ -246,10 +251,10 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
 		PCU_COMM_UNPACK(face);
 		int otherTimeCluster, timeCluster;
 		PCU_Comm_Unpack(&otherTimeCluster, sizeof(otherTimeCluster));
-    
+
     apf::Up elements;
     mesh->getUp(face, elements);
-    if (elements.n != 1) {            
+    if (elements.n != 1) {
       std::cerr << "That is unexpected." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, -1);
     }
@@ -260,7 +265,7 @@ int normalizeClustering(apf::Mesh2* mesh, int maxDifference = 1)
       ++numberOfReductions;
     }
 	}
-  
+
   return numberOfReductions;
 }
 
@@ -268,13 +273,13 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
 {
 	int rank = 0;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  
+
   unsigned nLocalElements = apf::countOwned(mesh, 3);
   idx_t* vwgt = new idx_t[ncon*nLocalElements];
   double globalMinTimestep, globalMaxTimestep;
   int globalNumDrFaces;
 
-  computeTimesteps(mesh, velocityModel, globalMinTimestep, globalMaxTimestep);  
+  computeTimesteps(mesh, velocityModel, globalMinTimestep, globalMaxTimestep);
   countDynamicRuptureFaces(mesh, globalNumDrFaces);
 
 	apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
@@ -288,7 +293,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
     mesh->setIntTag(element, clusterTag, &timeCluster);
   }
   mesh->end(it);
-  
+
   if (timestepRate > 1) {
     int totalNumberOfReductions = 0;
     int localNumberOfReductions, globalNumberOfReductions;
@@ -302,10 +307,10 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
       MPI_Allreduce(&localNumberOfReductions, &globalNumberOfReductions, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
       totalNumberOfReductions += globalNumberOfReductions;
     } while (globalNumberOfReductions > 0);
-    
+
     logInfo(rank) << "Number of reductions:" << totalNumberOfReductions;
   }
-  
+
   if (enableDRWeights) {
     ncon = (globalNumDrFaces > 0) ? 2 : 1;
   } else {
@@ -322,7 +327,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
     if (ncon > 1) {
       vwgt[ncon*iElem] = ipow(timestepRate, maxCluster - timeCluster);
       vwgt[ncon*iElem+1] = (dynamicRupture > 0) ? 1 : 0;
-    } else {      
+    } else {
       // Actually the plus cell does all the work but I think this cannot
       // be adequately modeled here.
       vwgt[ncon*iElem] = (1 + drToCellRatio*dynamicRupture) * ipow(timestepRate, maxCluster - timeCluster);
