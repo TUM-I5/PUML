@@ -151,14 +151,13 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
 
   apf::MeshIterator* it = mesh->begin(3);
   while (apf::MeshEntity* element = mesh->iterate(it)) {
-    int difference = maxDifference;
-
     int timeCluster;
     mesh->getIntTag(element, clusterTag, &timeCluster);
 
     apf::Downward faces;
     mesh->getDownward(element, 2, faces);
     for (unsigned f = 0; f < 4; ++f) {
+      int difference = maxDifference;
       int boundary = -1;
       if (mesh->hasTag(faces[f], boundaryTag)) {
         mesh->getIntTag(faces[f], boundaryTag, &boundary);
@@ -229,8 +228,8 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
       MPI_Abort(MPI_COMM_WORLD, -1);
     }
     int boundary = -1;
-    if (mesh->hasTag(elements.e[0], boundaryTag)) {
-      mesh->getIntTag(elements.e[0], boundaryTag, &boundary);
+    if (mesh->hasTag(face, boundaryTag)) {
+      mesh->getIntTag(face, boundaryTag, &boundary);
     }
     if (boundary == -1 || boundary == 3 || boundary == 6) {
       mesh->getIntTag(elements.e[0], clusterTag, &timeCluster);
