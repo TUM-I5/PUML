@@ -141,43 +141,6 @@ void countDynamicRuptureFaces(apf::Mesh2* mesh, int& globalNumDrFaces)
   MPI_Allreduce(&localNumDrFaces, &globalNumDrFaces, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 }
 
-int enforceDynamicRuptureGTS(apf::Mesh2* mesh)
-{
-  int numberOfReductions = 0;
-
-	apf::MeshTag* dynRupTag = mesh->findTag("dynamicRupture");
-	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
-
-  int localMinCluster = std::numeric_limits<int>::max(), globalMinCluster;
-  apf::MeshIterator* it = mesh->begin(3);
-  while (apf::MeshEntity* element = mesh->iterate(it)) {
-    int dynamicRupture;
-    mesh->getIntTag(element, dynRupTag, &dynamicRupture);
-    if (dynamicRupture > 0) {
-      int timeCluster;
-      mesh->getIntTag(element, clusterTag, &timeCluster);
-      localMinCluster = std::min(localMinCluster, timeCluster);
-    }
-  }
-	mesh->end(it);
-
-  MPI_Allreduce(&localMinCluster, &globalMinCluster, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
-
-  it = mesh->begin(3);
-  while (apf::MeshEntity* element = mesh->iterate(it)) {
-    int dynamicRupture, timeCluster;
-    mesh->getIntTag(element, dynRupTag, &dynamicRupture);
-    mesh->getIntTag(element, clusterTag, &timeCluster);
-    if (dynamicRupture > 0 && timeCluster != globalMinCluster) {
-      mesh->setIntTag(element, clusterTag, &globalMinCluster);
-      ++numberOfReductions;
-    }
-  }
-	mesh->end(it);
-
-  return numberOfReductions;
-}
-
 int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
 {
 	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
@@ -214,11 +177,9 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
 
           apf::MeshEntity* neighbour = (elements.e[0] == element) ? elements.e[1] : elements.e[0];
           int otherTimeCluster;
-          int otherDynamicRupture;
           mesh->getIntTag(neighbour, clusterTag, &otherTimeCluster);
-          mesh->getIntTag(neighbour, dynRupTag, &otherDynamicRupture);
           
-          if (otherDynamicRupture > 0) {
+          if (boundary == 3) {
             difference = 0;
           }
 
@@ -234,39 +195,32 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
   mesh->end(it);
 
   PCU_Comm_Begin();
-	it = mesh->begin(3);
-	while (apf::MeshEntity* element = mesh->iterate(it)) {
-		apf::Downward faces;
-		mesh->getDownward(element, 2, faces);
+  it = mesh->begin(3);
+  while (apf::MeshEntity* element = mesh->iterate(it)) {
+    apf::Downward faces;
+    mesh->getDownward(element, 2, faces);
 
-		for (unsigned int i = 0; i < 4; i++) {
-			if (!mesh->isShared(faces[i])) {
-				continue;
+    for (unsigned int i = 0; i < 4; i++) {
+      if (!mesh->isShared(faces[i])) {
+        continue;
       }
-			apf::Copy other = apf::getOtherCopy(mesh, faces[i]);
-			PCU_COMM_PACK(other.peer, other.entity);
-			int timeCluster;
-			mesh->getIntTag(element, clusterTag, &timeCluster);
-			PCU_COMM_PACK(other.peer, timeCluster);
-			int dynamicRupture;
-			mesh->getIntTag(element, dynRupTag, &dynamicRupture);
-			PCU_COMM_PACK(other.peer, dynamicRupture);
-		}
-	}
-	mesh->end(it);
-	PCU_Comm_Send();
+      apf::Copy other = apf::getOtherCopy(mesh, faces[i]);
+      PCU_COMM_PACK(other.peer, other.entity);
+      int timeCluster;
+      mesh->getIntTag(element, clusterTag, &timeCluster);
+      PCU_COMM_PACK(other.peer, timeCluster);
+    }
+  }
+  mesh->end(it);
+  PCU_Comm_Send();
 
-	while (PCU_Comm_Receive()) {
+  while (PCU_Comm_Receive()) {
     int difference = maxDifference;
 
-		apf::MeshEntity* face;
-		PCU_COMM_UNPACK(face);
-		int otherTimeCluster, otherDynamicRupture, timeCluster;
-		PCU_Comm_Unpack(&otherTimeCluster, sizeof(otherTimeCluster));
-		PCU_Comm_Unpack(&otherDynamicRupture, sizeof(otherDynamicRupture));    
-    if (otherDynamicRupture > 0) {
-      difference = 0;
-    }
+    apf::MeshEntity* face;
+    PCU_COMM_UNPACK(face);
+    int otherTimeCluster, timeCluster;
+    PCU_Comm_Unpack(&otherTimeCluster, sizeof(otherTimeCluster));
 
     apf::Up elements;
     mesh->getUp(face, elements);
@@ -274,13 +228,22 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
       std::cerr << "That is unexpected." << std::endl;
       MPI_Abort(MPI_COMM_WORLD, -1);
     }
-    mesh->getIntTag(elements.e[0], clusterTag, &timeCluster);
-    if (timeCluster > otherTimeCluster + difference) {
-      timeCluster = otherTimeCluster + difference;
-      mesh->setIntTag(elements.e[0], clusterTag, &timeCluster);
-      ++numberOfReductions;
+    int boundary = -1;
+    if (mesh->hasTag(elements.e[0], boundaryTag)) {
+      mesh->getIntTag(elements.e[0], boundaryTag, &boundary);
     }
-	}
+    if (boundary == -1 || boundary == 3 || boundary == 6) {
+      mesh->getIntTag(elements.e[0], clusterTag, &timeCluster);
+      if (boundary == 3) {
+        difference = 0;
+      }
+      if (timeCluster > otherTimeCluster + difference) {
+        timeCluster = otherTimeCluster + difference;
+        mesh->setIntTag(elements.e[0], clusterTag, &timeCluster);
+        ++numberOfReductions;
+      }
+    }
+  }
 
   return numberOfReductions;
 }
@@ -316,11 +279,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
     int totalNumberOfReductions = 0;
     int localNumberOfReductions, globalNumberOfReductions;
     do {
-      localNumberOfReductions = 0;
-      if (globalNumDrFaces > 0) {
-        localNumberOfReductions += enforceDynamicRuptureGTS(mesh);
-      }
-      localNumberOfReductions += enforceMaximumDifference(mesh);
+      localNumberOfReductions = enforceMaximumDifference(mesh);
 
       MPI_Allreduce(&localNumberOfReductions, &globalNumberOfReductions, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
       totalNumberOfReductions += globalNumberOfReductions;
