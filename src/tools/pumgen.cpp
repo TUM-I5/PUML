@@ -350,9 +350,10 @@ int main(int argc, char* argv[])
   idx_t* vwgt = 0L;
   idx_t* adjwgt = 0L;
   if (enableVertexWeights > 0) {
-    vwgt = computeVertexWeights(mesh, ncon, enableVertexWeights, drToCellRatio, enableDRMultiConstraint, velocityModel);
+    unsigned maxCluster;
+    vwgt = computeVertexWeights(mesh, ncon, enableVertexWeights, drToCellRatio, enableDRMultiConstraint, velocityModel, maxCluster);
     if (enableEdgeWeights) {
-      adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
+      adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements], enableVertexWeights, maxCluster);
       wgtflag = 3;
     } else {
       wgtflag = 2;
