@@ -143,6 +143,7 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
   args.addOption("vertex-weights", 'v', "Use vertex weights (pass cluster rate, e.g. 1 for GTS and 2 for rate-2 LTS).",
       utils::Args::Required, false);
+  args.addOption("edge-weights", 'e', "Use edge weights (does only work if -v is given).", utils::Args::No, false);
   args.addOption("dr-multi-constraint", 'r', "Enable dynamic rupture weights (multi-constraint)", utils::Args::No, false);
   args.addOption("dr-to-cell-ratio", 0, "Weight dynamic faces with this ratio vs tets", utils::Args::Required, false);
   args.addOption("velocity-model", 0, "Velocity model for local time stepping",
@@ -188,10 +189,15 @@ int main(int argc, char* argv[])
   
   // Check velocity model
   int enableVertexWeights = args.getArgument<int>("vertex-weights", 0);
+  bool enableEdgeWeights = args.getArgument<bool>("edge-weights", false);
   bool enableDRMultiConstraint = args.getArgument<bool>("dr-multi-constraint", false);
   int drToCellRatio = args.getArgument<int>("dr-to-cell-ratio", 0);
   if (enableDRMultiConstraint && drToCellRatio != 0) {
     std::cerr << "Warning: You should not set dr-multi-constraint and dr-to-cell-ratio simultaneously." << std::endl;
+  }
+  if (enableEdgeWeights && enableVertexWeights < 2) {
+    std::cerr << "Edge weights only work with enabled LTS weights (i.e -v 2)." << std::endl;
+    return -1;
   }
   const char* velocityModel = args.getArgument<const char*>("velocity-model", "");
   if (strlen(velocityModel) > 0) {
@@ -344,10 +350,13 @@ int main(int argc, char* argv[])
   idx_t* vwgt = 0L;
   idx_t* adjwgt = 0L;
   if (enableVertexWeights > 0) {
-    // wgtflag = 3;
-    wgtflag = 2;
     vwgt = computeVertexWeights(mesh, ncon, enableVertexWeights, drToCellRatio, enableDRMultiConstraint, velocityModel);
-    // adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
+    if (enableEdgeWeights) {
+      adjwgt = computeEdgeWeights(mesh, dualGraph, xadj[nLocalElements]);
+      wgtflag = 3;
+    } else {
+      wgtflag = 2;
+    }
   }
 
 	delete [] dualGraph;
@@ -384,6 +393,7 @@ int main(int argc, char* argv[])
 	delete [] xadj;
 	delete [] adjncy;
 	delete [] tpwgts;
+  delete[] adjwgt;
 
 	// Compute the number of partitions for each rank
 	unsigned int nMaxLocalPart = (nPartitions + processes - 1) / processes;

@@ -247,7 +247,7 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
   return numberOfReductions;
 }
 
-idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int drToCellRatio, bool enableDRWeights, char const* velocityModel)
+idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int drToCellRatio, bool enableDRWeights, char const* velocityModel, unsigned& maxCluster)
 {
 	int rank = 0;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -294,7 +294,7 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
   }
   
   idx_t* vwgt = new idx_t[ncon*nLocalElements];
-  unsigned maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, timestepRate);
+  maxCluster = getCluster(globalMaxTimestep, globalMinTimestep, timestepRate);
   int* localClusterHistogram = new int[maxCluster+1];
   int* globalClusterHistogram;
   if (rank == 0) {
@@ -334,12 +334,101 @@ idx_t* computeVertexWeights(apf::Mesh2* mesh, idx_t& ncon, int timestepRate, int
   return vwgt;
 }
 
-idx_t* computeEdgeWeights(apf::Mesh2* mesh, int const* dualGraph, idx_t nEdges)
+void determineEdgeWeights(apf::Mesh2* mesh, int timestepRate, unsigned maxCluster)
 {
+	apf::MeshTag* clusterTag = mesh->findTag("timeCluster");
+  apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
+  apf::MeshTag* edgeWeightTag = mesh->findTag("edgeWeight");
+
+  apf::MeshIterator* it = mesh->begin(3);
+  while (apf::MeshEntity* element = mesh->iterate(it)) {
+    int timeCluster;
+    mesh->getIntTag(element, clusterTag, &timeCluster);
+
+    apf::Downward faces;
+    mesh->getDownward(element, 2, faces);
+    for (unsigned f = 0; f < 4; ++f) {
+      int boundary = -1;
+      if (mesh->hasTag(faces[f], boundaryTag)) {
+        mesh->getIntTag(faces[f], boundaryTag, &boundary);
+      }
+      // Continue for regular, dynamic rupture, and periodic boundary cells
+      if (boundary == -1 || boundary == 3 || boundary == 6) {
+        // We treat MPI neighbours later
+        if (!mesh->isShared(faces[f])) {
+          apf::Up elements;
+          mesh->getUp(faces[f], elements);
+
+          if (elements.n != 2) {
+            std::cerr << "Could not find a face neighbour." << std::endl;
+            MPI_Abort(MPI_COMM_WORLD, -1);
+          }
+
+          apf::MeshEntity* neighbour = (elements.e[0] == element) ? elements.e[1] : elements.e[0];
+          int otherTimeCluster;
+          mesh->getIntTag(neighbour, clusterTag, &otherTimeCluster);
+
+          int edgeWeight = ipow(timestepRate, maxCluster - std::max(timeCluster, otherTimeCluster));
+          mesh->setIntTag(faces[f], edgeWeightTag, &edgeWeight);
+        }
+      }
+    }
+    mesh->setIntTag(element, clusterTag, &timeCluster);
+  }
+  mesh->end(it);
+
+  PCU_Comm_Begin();
+  it = mesh->begin(3);
+  while (apf::MeshEntity* element = mesh->iterate(it)) {
+    apf::Downward faces;
+    mesh->getDownward(element, 2, faces);
+
+    for (unsigned int i = 0; i < 4; i++) {
+      if (!mesh->isShared(faces[i])) {
+        continue;
+      }
+      apf::Copy other = apf::getOtherCopy(mesh, faces[i]);
+      PCU_COMM_PACK(other.peer, other.entity);
+      int timeCluster;
+      mesh->getIntTag(element, clusterTag, &timeCluster);
+      PCU_COMM_PACK(other.peer, timeCluster);
+    }
+  }
+  mesh->end(it);
+  PCU_Comm_Send();
+
+  while (PCU_Comm_Receive()) {
+    apf::MeshEntity* face;
+    PCU_COMM_UNPACK(face);
+    int otherTimeCluster, timeCluster;
+    PCU_Comm_Unpack(&otherTimeCluster, sizeof(otherTimeCluster));
+
+    apf::Up elements;
+    mesh->getUp(face, elements);
+    if (elements.n != 1) {
+      std::cerr << "That is unexpected." << std::endl;
+      MPI_Abort(MPI_COMM_WORLD, -1);
+    }
+    int boundary = -1;
+    if (mesh->hasTag(face, boundaryTag)) {
+      mesh->getIntTag(face, boundaryTag, &boundary);
+    }
+    if (boundary == -1 || boundary == 3 || boundary == 6) {
+      mesh->getIntTag(elements.e[0], clusterTag, &timeCluster);
+      int edgeWeight = ipow(timestepRate, maxCluster - std::max(timeCluster, otherTimeCluster));
+      mesh->setIntTag(face, edgeWeightTag, &edgeWeight);
+    }
+  }
+}
+
+idx_t* computeEdgeWeights(apf::Mesh2* mesh, int const* dualGraph, idx_t nEdges, int timestepRate, unsigned maxCluster)
+{
+	apf::MeshTag* edgeWeightTag = mesh->createIntTag("edgeWeight", 1);
+  determineEdgeWeights(mesh, timestepRate, maxCluster);
+  
   unsigned nLocalElements = apf::countOwned(mesh, 3);
   idx_t* adjwgt = new idx_t[nEdges];
   std::fill(adjwgt, adjwgt + nEdges, 1.0);
-  apf::MeshTag* boundaryTag = mesh->findTag("boundary condition");
 	unsigned int pos = 0;
 	apf::MeshIterator* it = mesh->begin(3);
 	for (unsigned int e = 0; e < nLocalElements; ++e) {
@@ -348,13 +437,13 @@ idx_t* computeEdgeWeights(apf::Mesh2* mesh, int const* dualGraph, idx_t nEdges)
     mesh->getDownward(element, 2, faces);
     for (unsigned int f = 0; f < 4; ++f) {
       if (dualGraph[e*4 + f] >= 0) {
-        if (boundaryTag && mesh->hasTag(faces[f], boundaryTag)) {
-          int boundary;
-          mesh->getIntTag(faces[f], boundaryTag, &boundary);
-          if (boundary == 3) {
-            adjwgt[pos] = 100.0;
-          }
+        if (!mesh->hasTag(faces[f], edgeWeightTag)) {
+          std::cerr << "Something went terribly wrong." << std::endl;
+          MPI_Abort(MPI_COMM_WORLD, -1);
         }
+        int edgeWeight;
+        mesh->getIntTag(faces[f], edgeWeightTag, &edgeWeight);
+        adjwgt[pos] = edgeWeight;
         ++pos;
       }
     }
