@@ -15,6 +15,7 @@ Import('env')
 
 env.sourceFiles['pumgen'].append(env.tools.Object('NetCDFPartition.cpp'))
 env.sourceFiles['pumgen'].append(env.tools.Object('ParallelVertexFilter.cpp'))
+env.sourceFiles['pumgen'].append(env.tools.Object('tinyxml2.cpp'))
 
 if env['simModSuite']:
 	env.sourceFiles['pumgen'].append(env.tools.Object('SimModSuite.cpp'))
