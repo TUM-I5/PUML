@@ -158,6 +158,10 @@ int main(int argc, char* argv[])
 			utils::Args::Required, false);
 	args.addOption("analysis", 0, "Analysis attributes name (only used by SimModSuite, default: \"analysis\")",
 			utils::Args::Required, false);
+   args.addOption("stl", 0, "Use STL-input with parameter file (only used by SimModSuite)",
+         utils::Args::Required, false);
+   args.addOption("prbfc", 0, "Probe the coordinates of the model's faces (only used by SimModSuite)",
+         utils::Args::No, false);
 	const char* forces[] = {"0", "1", "2"};
 	args.addEnumOption("enforce-size", forces, 0, "Enforce mesh size (only used by SimModSuite, default: 0)", false);
 	args.addOption("sim_log", 0, "Create SimModSuite log", utils::Args::Required, false);
@@ -248,6 +252,8 @@ int main(int argc, char* argv[])
 				args.getArgument<const char*>("mesh", "mesh"),
 				args.getArgument<const char*>("analysis", "analysis"),
 				args.getArgument<int>("enforce-size", 0),
+            args.getArgument<const char*>("stl",0L),
+            args.isSet("prbfc"),
 				args.getArgument<const char*>("sim_log", 0L));
 
 #else // USE_SIMMOD
