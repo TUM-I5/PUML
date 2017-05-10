@@ -29,7 +29,7 @@ unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
 }
 
 int ipow(int x, int y) {
-  assert(y > 0);
+  assert(y >= 0);
 
   if (y == 0) {
     return 1;
