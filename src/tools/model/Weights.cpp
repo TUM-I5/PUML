@@ -171,6 +171,10 @@ int enforceMaximumDifference(apf::Mesh2* mesh, int maxDifference = 1)
 
           if (elements.n != 2) {
             std::cerr << "Could not find a face neighbour." << std::endl;
+            std::cerr << "For that element: boundary = " << boundary << std::endl;
+            apf::Vector3 tmp;
+            tmp = getLinearCentroid(mesh,elements.e[0]);
+            std::cerr << "linear centroid"<< tmp[0]<< " " << tmp[1]<< " "<<tmp[2]<< std::endl;
             MPI_Abort(MPI_COMM_WORLD, -1);
           }
 
@@ -361,6 +365,10 @@ void determineEdgeWeights(apf::Mesh2* mesh, int timestepRate, unsigned maxCluste
 
           if (elements.n != 2) {
             std::cerr << "Could not find a face neighbour." << std::endl;
+            std::cerr << "For that element: boundary = " << boundary << std::endl;
+            apf::Vector3 tmp;
+            tmp = getLinearCentroid(mesh,elements.e[0]);
+            std::cerr << "linear centroid"<< tmp[0]<< " " << tmp[1]<< " "<<tmp[2]<< std::endl;
             MPI_Abort(MPI_COMM_WORLD, -1);
           }
 
