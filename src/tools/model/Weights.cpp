@@ -11,6 +11,8 @@
 
 #include "SeismicVelocity.h"
 
+#include "netcdf.h"
+
 unsigned getCluster(double timestep, double globalMinTimestep, unsigned rate)
 {
   if (rate == 1) {
@@ -41,15 +43,81 @@ int ipow(int x, int y) {
   return result;
 }
 
+void check_err(const int stat, const int line, const char *file) {
+  if (stat != NC_NOERR) {
+    logError() << "line" << line << "of" << file << ":" << nc_strerror(stat) << std::endl;
+  }
+}
+
+void readAsagiDerivedNetcdfData(int &nx, int &ny, int &nz, double * &xNc, double * &yNc,double * &zNc, double * &VpNc)
+{
+   int stat;
+   int ncFile, varid,dimid;
+   size_t na,nb,nc;
+
+   stat = (nc_open("AsagiDerivedVp.nc", NC_NETCDF4, &ncFile));
+   check_err(stat,__LINE__,__FILE__);
+
+   stat = (nc_inq_dimid(ncFile, "x", &dimid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_dimlen(ncFile, dimid, &na));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_dimid(ncFile, "y", &dimid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_dimlen(ncFile, dimid, &nb));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_dimid(ncFile, "z", &dimid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_dimlen(ncFile, dimid, &nc));
+   check_err(stat,__LINE__,__FILE__);
+
+   nx=static_cast<int>(na);
+   ny=static_cast<int>(nb);
+   nz=static_cast<int>(nc);
+
+
+   xNc = new double [nx];
+   yNc = new double [ny];
+   zNc = new double [nz];
+   VpNc = new double [nx*ny*nz];
+
+   stat = (nc_inq_varid(ncFile, "x", &varid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_get_var(ncFile, varid, &xNc[0]));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_varid(ncFile, "y", &varid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_get_var(ncFile, varid, &yNc[0]));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_varid(ncFile, "z", &varid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_get_var(ncFile, varid, &zNc[0]));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_inq_varid(ncFile, "Vp", &varid));
+   check_err(stat,__LINE__,__FILE__);
+   stat = (nc_get_var(ncFile, varid, &VpNc[0]));
+   check_err(stat,__LINE__,__FILE__);
+   
+}
+
+
 void computeTimesteps(apf::Mesh2* mesh, char const* velocityModel, double& globalMinTimestep, double& globalMaxTimestep)
 {
   double localMinTimestep = std::numeric_limits<double>::max();
   double localMaxTimestep = std::numeric_limits<double>::min();
 	apf::MeshTag* timestepTag = mesh->createDoubleTag("timestep", 1);
+  int nx,ny,nz;
+  double *xNc = NULL;
+  double *yNc = NULL;
+  double *zNc = NULL;
+  double *VpNc = NULL;
 
   if (strlen(velocityModel) > 0) {
     double (*pWaveVelocityFun)(int,double,double,double);
-    if (strcmp(velocityModel, "landers61") == 0) {
+    if (strcmp(velocityModel, "AsagiDerived") == 0) {
+      readAsagiDerivedNetcdfData(nx,ny,nz,xNc,yNc,zNc,VpNc);
+      //pWaveVelocityFun has a different list of arguments, so we cant use the function pointer here
+    } else if (strcmp(velocityModel, "landers61") == 0) {
       pWaveVelocityFun = &landers61;
     } else if (strcmp(velocityModel, "sumatra1223") == 0) {
 	pWaveVelocityFun = 0L;
@@ -68,6 +136,7 @@ void computeTimesteps(apf::Mesh2* mesh, char const* velocityModel, double& globa
     // Compute barycenter of each tetrahedron
     apf::MeshTag* groupTag = mesh->findTag("group");
     apf::MeshIterator* it = mesh->begin(3);
+
     while (apf::MeshEntity* element = mesh->iterate(it)) {
       apf::Downward vertices;
       mesh->getDownward(element, 0, vertices);
@@ -81,7 +150,12 @@ void computeTimesteps(apf::Mesh2* mesh, char const* velocityModel, double& globa
       if (groupTag && mesh->hasTag(element, groupTag)) {
         mesh->getIntTag(element, groupTag, &group);
       }
-      double timestep = pWaveVelocityFun(group, barycenter.x(), barycenter.y(), barycenter.z());
+      double timestep;
+      if (strcmp(velocityModel, "AsagiDerived") == 0) {
+         timestep = AsagiDerived(group, barycenter.x(), barycenter.y(), barycenter.z(), nx,ny,nz,xNc,yNc,zNc,VpNc);
+      } else {
+         timestep = pWaveVelocityFun(group, barycenter.x(), barycenter.y(), barycenter.z());
+      }
       if (timestep < 0.0) {
         std::cerr << "Negative p wave velocity encountered." << std::endl;
         MPI_Abort(MPI_COMM_WORLD, -1);

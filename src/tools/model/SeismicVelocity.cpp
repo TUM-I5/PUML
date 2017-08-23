@@ -1,4 +1,72 @@
 #include "SeismicVelocity.h"
+#include <iostream>
+
+double AsagiDerived(int, double x, double y, double z, int nx, int ny, int nz, double *xNc, double *yNc,double *zNc, double *VpNc)
+{
+   int i1,j1,k1;
+   double ax,ay,az;
+   for (i1 = 0; i1 < nx; i1++)
+   {
+      if (xNc[i1]>=x) 
+         break;
+   }
+   for (j1 = 0; j1 < ny; j1++)
+   {
+      if (yNc[j1]>=y) 
+         break;
+   }
+   for (k1 = 0; k1 < nz; k1++)
+   {
+      if (zNc[k1]>=z) 
+         break;
+   }
+   
+
+   if (i1==0) {
+       std::cerr<<"i1 =0 "<<x<<" "<<xNc[0];
+       i1=1;
+       ax=0.0;
+   } else if (x>xNc[nx-1]) {
+       std::cerr<<"i1 =nx-1 "<<x<<" "<<xNc[nx-1];
+       i1=nx-1;
+       ax = 1.0;
+   } else {
+       ax = (x-xNc[i1-1])/(xNc[i1]-xNc[i1-1]);
+   }
+
+   if (j1==0) {
+       std::cerr<<"j1 =0 "<<y<<" "<<yNc[0];
+       j1=1;
+       ay=0.0;
+   } else if (y>yNc[ny-1]) {
+       std::cerr<<"j1 =ny-1 "<<y<<" "<<yNc[ny-1];
+       j1=ny-1;
+       ay = 1.0;
+   } else {
+       ay = (y-yNc[j1-1])/(yNc[j1]-yNc[j1-1]);
+   }
+
+   if (k1==0) {
+       std::cerr<<"k1 =0 "<<z<<" "<<zNc[0];
+       k1=1;
+       az=0.0;
+   } else if (z>zNc[nz-1]) {
+       std::cerr<<"k1 =nz-1 "<<z<<" "<<zNc[nz-1];
+       k1=nz-1;
+       az = 1.0;
+   } else {
+       az = (z-zNc[k1-1])/(zNc[k1]-zNc[k1-1]);
+   }
+   if ((std::min(ax,std::min(ay,az))<0)|(std::max(ax,std::max(ay,az))>1))
+      std::cerr<<ax<<" "<<ay<<" "<<az;
+   int na=ny*nz;
+   double vp  = ax*ay*az*VpNc[i1*na+j1*nz+k1] + ax*ay*(1.0-az)*VpNc[i1*na+j1*nz+k1-1] + 
+                                   ax*(1.0-ay)*az*VpNc[i1*na+(j1-1)*nz+k1] + ax*(1.0-ay)*(1.0-az)*VpNc[i1*na+(j1-1)*nz+k1-1] + 
+                                   (1.0-ax)*ay*az*VpNc[(i1-1)*na+j1*nz+k1] + (1.0-ax)*ay*(1.0-az)*VpNc[(i1-1)*na+j1*nz+k1-1] + 
+                                   (1.0-ax)*(1.0-ay)*az*VpNc[(i1-1)*na+(j1-1)*nz+k1] + (1.0-ax)*(1.0-ay)*(1.0-az)*VpNc[(i1-1)*na+(j1-1)*nz+k1-1];
+  
+  return vp;
+}
 
 double landers61(int, double, double, double z)
 {
